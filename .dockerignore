@@ -1,0 +1,30 @@
+# Build artifacts
+target/
+
+# Git
+.git/
+.gitignore
+
+# Documentation
+*.md
+docs/
+examples/
+
+# Tests
+test/
+tests/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment
+.env
+.env.*
+
+# Misc
+*.log
+.DS_Store
+

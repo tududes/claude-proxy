@@ -1,0 +1,22 @@
+services:
+  claude-proxy:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: claude-openai-proxy
+    ports:
+      - "8080:8080"
+    environment:
+      # Backend URL - change to your OpenAI-compatible backend
+      BACKEND_URL: ${BACKEND_URL:-https://llm.chutes.ai/v1/chat/completions}
+      # Backend API key (optional, can use client's key)
+      BACKEND_KEY: ${BACKEND_KEY:-}
+      # Log level
+      RUST_LOG: ${RUST_LOG:-info}
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8080/v1/messages/count_tokens", "-H", "Content-Type: application/json", "-d", "{\"model\":\"test\",\"messages\":[]}" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
