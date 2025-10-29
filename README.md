@@ -153,7 +153,7 @@ const client = new Anthropic({
 
 **Supported content types:**
 - Text (string or content blocks)
-- Images (base64 encoded, converted to data URIs)
+- Images (base64 encoded, automatically converted to OpenAI data URI format)
 - Tool use and tool results
 - Multi-turn conversations with system prompts
 
@@ -170,6 +170,39 @@ curl -N http://localhost:8080/v1/messages \
 ```
 
 See [docs/CLAUDE_CODE_SUPPORT.md](docs/CLAUDE_CODE_SUPPORT.md) for complete API documentation and all 9 Claude Code patterns.
+
+## Image Support
+
+The proxy fully supports image forwarding from Claude to OpenAI-compatible backends.
+
+**Automatic Conversion:**
+- Claude format: `{type: "image", source: {media_type: "image/png", data: "base64..."}}`
+- OpenAI format: `{type: "image_url", image_url: {url: "data:image/png;base64,..."}}` ✅
+
+**Vision-Capable Models (Tested):**
+- `shisa-ai/shisa-v2-llama3.3-70b` ✅ 
+- `claude-3-5-sonnet-*` ✅
+- Models with "vision" in name/features ✅
+
+**Non-Vision Models:**
+- `zai-org/GLM-4.6-turbo` ❌ (reasoning-only, no image support)
+- Most standard text models ❌
+
+**Testing Images:**
+```bash
+# Test backend directly (uses .env)
+./test_backend_direct.sh               # Default model
+./test_backend_direct.sh $KEY MODEL    # Specific model
+
+# Test through proxy
+./test_image.sh YOUR_API_KEY          # Quick test
+python test_image.py YOUR_API_KEY     # Detailed test
+```
+
+**Debugging:**
+- Run with `RUST_LOG=debug cargo run` to see image processing
+- Look for: `🖼️ Processing image`, `🔍 Detected image type: PNG/JPEG`
+- If model doesn't respond to images, it likely lacks vision support
 
 ## Testing
 
