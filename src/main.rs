@@ -216,7 +216,6 @@ async fn main() {
         }
     );
     info!("   Mode: Passthrough with case-correction");
-    info!("   Listening on: 0.0.0.0:8080");
 
     let models_cache = Arc::new(RwLock::new(None));
     
@@ -248,7 +247,12 @@ async fn main() {
         .route("/v1/messages/count_tokens", post(count_tokens))
         .with_state(app);
 
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:8080").await.unwrap();
+    let port = env::var("HOST_PORT")
+        .unwrap_or_else(|_| "8080".into())
+        .parse::<u16>()
+        .unwrap_or(8080);
+    let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port)).await.unwrap();
+    info!("   Listening on: 0.0.0.0:{}", port);
     axum::serve(listener, router).await.unwrap();
 }
 

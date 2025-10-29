@@ -1,0 +1,6 @@
+{$CADDY_DOMAIN:}:{$CADDY_PORT:443} {
+	reverse_proxy claude-proxy:{$HOST_PORT:8181}
+}
+
+# Port 80 is only used for ACME challenges (handled automatically by Caddy)
+# No site block needed - Caddy will use port 80 for challenge validation only

@@ -4,19 +4,42 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: claude-openai-proxy
-    ports:
-      - "8080:8080"
     environment:
+      # Host port for the proxy (maps to container port 8080)
+      HOST_PORT: ${HOST_PORT:-8181}
       # Backend URL - change to your OpenAI-compatible backend
       BACKEND_URL: ${BACKEND_URL:-https://llm.chutes.ai/v1/chat/completions}
       # Backend API key (optional, can use client's key)
       BACKEND_KEY: ${BACKEND_KEY:-}
       # Log level
       RUST_LOG: ${RUST_LOG:-info}
+    ports:
+      - "${HOST_PORT:-8181}:${HOST_PORT:-8181}"
     restart: unless-stopped
     healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:8080/v1/messages/count_tokens", "-H", "Content-Type: application/json", "-d", "{\"model\":\"test\",\"messages\":[]}" ]
+      test: [ "CMD", "curl", "-f", "http://localhost:${HOST_PORT:-8181}/v1/messages/count_tokens", "-H", "Content-Type: application/json", "-d", "{\"model\":\"test\",\"messages\":[]}" ]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 5s
+
+  caddy:
+    image: caddy:latest
+    container_name: claude-proxy-caddy
+    environment:
+      - HOST_PORT=${HOST_PORT:-8181}
+      - CADDY_DOMAIN=${CADDY_DOMAIN:-}
+      - CADDY_PORT=${CADDY_PORT:-8180}
+    ports:
+      - "${CADDY_PORT:-8180}:${CADDY_PORT:-8180}"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - claude-proxy
+    restart: unless-stopped
+
+volumes:
+  caddy_data:
+  caddy_config:

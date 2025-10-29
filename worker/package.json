@@ -1,0 +1,12 @@
+{
+  "name": "claude-proxy-worker",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "worker-build --release"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240208.0",
+    "wrangler": "^3.19.0"
+  }
+}
