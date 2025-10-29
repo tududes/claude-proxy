@@ -1,0 +1,38 @@
+{
+    "model": "{{MODEL}}",
+    "messages": [
+        {
+            "role": "user",
+            "content": "Read the README file"
+        },
+        {
+            "role": "assistant",
+            "content": [
+                {
+                    "type": "text",
+                    "text": "I will read that file for you."
+                },
+                {
+                    "type": "tool_use",
+                    "id": "toolu_01234",
+                    "name": "read_file",
+                    "input": {
+                        "path": "README.md"
+                    }
+                }
+            ]
+        },
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "tool_result",
+                    "tool_use_id": "toolu_01234",
+                    "content": "README contents here"
+                }
+            ]
+        }
+    ],
+    "max_tokens": 200,
+    "stream": true
+}

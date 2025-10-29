@@ -1,0 +1,13 @@
+{
+    "model": "{{MODEL}}",
+    "system": "You are an expert Python developer who gives concise, practical answers.",
+    "messages": [
+        {
+            "role": "user",
+            "content": "Explain Python list comprehensions in one sentence with a simple example."
+        }
+    ],
+    "max_tokens": 150,
+    "temperature": 0.5,
+    "stream": true
+}

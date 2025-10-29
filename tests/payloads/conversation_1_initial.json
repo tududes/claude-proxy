@@ -1,0 +1,12 @@
+{
+    "model": "{{MODEL}}",
+    "messages": [
+        {
+            "role": "user",
+            "content": "Write a short Python function to calculate the nth fibonacci number. Just the code, no explanation."
+        }
+    ],
+    "max_tokens": 300,
+    "temperature": 0.7,
+    "stream": true
+}

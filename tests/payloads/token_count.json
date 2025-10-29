@@ -1,0 +1,36 @@
+{
+    "model": "claude-3-5-sonnet-20241022",
+    "messages": [
+        {
+            "role": "user",
+            "content": "Hello, how are you today? This is a test message for token counting."
+        },
+        {
+            "role": "assistant",
+            "content": "I'm doing well, thank you! How can I help you?"
+        },
+        {
+            "role": "user",
+            "content": "Can you write a simple Python function?"
+        }
+    ],
+    "system": "You are a helpful AI assistant.",
+    "tools": [
+        {
+            "name": "code_executor",
+            "description": "Execute Python code",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "code": {
+                        "type": "string",
+                        "description": "The Python code to execute"
+                    }
+                },
+                "required": [
+                    "code"
+                ]
+            }
+        }
+    ]
+}

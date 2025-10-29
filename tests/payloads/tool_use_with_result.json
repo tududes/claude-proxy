@@ -1,0 +1,56 @@
+{
+    "model": "claude-3-5-sonnet-20241022",
+    "messages": [
+        {
+            "role": "user",
+            "content": "What's 25 * 4?"
+        },
+        {
+            "role": "assistant",
+            "content": [
+                {
+                    "type": "text",
+                    "text": "I'll calculate that for you."
+                },
+                {
+                    "type": "tool_use",
+                    "id": "toolu_01A09q90qw90lq917835lq9",
+                    "name": "calculator",
+                    "input": {
+                        "expression": "25 * 4"
+                    }
+                }
+            ]
+        },
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "tool_result",
+                    "tool_use_id": "toolu_01A09q90qw90lq917835lq9",
+                    "content": "100"
+                }
+            ]
+        }
+    ],
+    "tools": [
+        {
+            "name": "calculator",
+            "description": "Perform basic arithmetic calculations",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "expression": {
+                        "type": "string",
+                        "description": "The mathematical expression to evaluate"
+                    }
+                },
+                "required": [
+                    "expression"
+                ]
+            }
+        }
+    ],
+    "max_tokens": 200,
+    "stream": true
+}

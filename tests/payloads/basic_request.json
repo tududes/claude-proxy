@@ -1,0 +1,12 @@
+{
+    "model": "{{MODEL}}",
+    "system": "You are a helpful assistant.",
+    "messages": [
+        {
+            "role": "user",
+            "content": "Tell me a short story in 50 words."
+        }
+    ],
+    "max_tokens": 256,
+    "stream": true
+}

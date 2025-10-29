@@ -1,0 +1,12 @@
+{
+    "model": "{{MODEL}}",
+    "messages": [
+        {
+            "role": "user",
+            "content": "Analyze file{{NUM}}.py: What does this function do? Be concise (one sentence)."
+        }
+    ],
+    "max_tokens": 100,
+    "temperature": 0.5,
+    "stream": true
+}

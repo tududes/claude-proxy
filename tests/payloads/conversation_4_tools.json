@@ -1,0 +1,46 @@
+{
+    "model": "{{MODEL}}",
+    "messages": [
+        {
+            "role": "user",
+            "content": "I want to understand this codebase. What file should I read first?"
+        }
+    ],
+    "tools": [
+        {
+            "name": "read_file",
+            "description": "Read the contents of a file",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "The path to the file to read"
+                    }
+                },
+                "required": [
+                    "path"
+                ]
+            }
+        },
+        {
+            "name": "list_directory",
+            "description": "List files in a directory",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "The directory path"
+                    }
+                },
+                "required": [
+                    "path"
+                ]
+            }
+        }
+    ],
+    "max_tokens": 200,
+    "temperature": 0.7,
+    "stream": true
+}

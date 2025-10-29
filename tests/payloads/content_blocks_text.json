@@ -1,0 +1,16 @@
+{
+    "model": "{{MODEL}}",
+    "messages": [
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "text",
+                    "text": "Explain this code snippet."
+                }
+            ]
+        }
+    ],
+    "max_tokens": 100,
+    "stream": true
+}
