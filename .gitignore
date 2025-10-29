@@ -1,0 +1,28 @@
+# Build artifacts
+/target
+Cargo.lock
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test artifacts
+/tmp
+*.tmp
+
