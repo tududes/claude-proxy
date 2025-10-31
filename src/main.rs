@@ -167,17 +167,27 @@ struct OAIChoiceDelta {
 struct OAIChoice {
     #[serde(default)]
     _index: usize,
-    delta: OAIChoiceDelta,
+    // Streaming responses use 'delta', non-streaming use 'message'
     #[serde(default)]
-    _finish_reason: Option<String>,
+    delta: Option<OAIChoiceDelta>,
+    // Non-streaming complete response (fallback)
+    #[serde(default)]
+    message: Option<serde_json::Value>,
+    #[serde(default)]
+    finish_reason: Option<String>,
 }
 #[derive(Deserialize, Default, Debug)]
+// Unknown fields are ignored by default (no deny_unknown_fields attribute)
 struct OAIStreamChunk {
     _id: Option<String>,
     _object: Option<String>,
     _created: Option<i64>,
     _model: Option<String>,
+    #[serde(default)]
     choices: Vec<OAIChoice>,
+    // Allow error fields for graceful handling
+    #[serde(default)]
+    error: Option<serde_json::Value>,
 }
 
 // ---------- Model info with pricing ----------
@@ -449,6 +459,21 @@ fn build_oai_tools(tools: Option<Vec<ClaudeTool>>) -> Option<Vec<OAITool>> {
                 .collect::<Vec<_>>(),
         ),
         _ => Some(vec![]),
+    }
+}
+
+/// Translate OpenAI finish_reason to Claude stop_reason
+fn translate_finish_reason(oai_reason: Option<&str>) -> &'static str {
+    match oai_reason {
+        Some("stop") => "end_turn",
+        Some("length") => "max_tokens",
+        Some("tool_calls") | Some("function_call") => "tool_use",
+        Some("content_filter") => "end_turn", // No direct equivalent
+        Some(other) => {
+            log::debug!("⚠️  Unknown finish_reason '{}', using 'end_turn'", other);
+            "end_turn"
+        }
+        None => "end_turn",
     }
 }
 
@@ -1089,6 +1114,21 @@ async fn messages(
     let status = res.status();
     log::debug!("📥 Backend response status: {}", status);
 
+    // Validate Content-Type for better error messages
+    let content_type = res.headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    log::debug!("📥 Backend Content-Type: {}", content_type);
+    
+    // Warn if unexpected content type (but don't fail - be permissive)
+    if !content_type.is_empty() 
+        && !content_type.contains("text/event-stream")
+        && !content_type.contains("application/json") 
+        && !content_type.contains("application/octet-stream") {
+        warn!("⚠️  Unexpected Content-Type: {} (expected text/event-stream or application/json)", content_type);
+    }
+
     if !status.is_success() {
         // If 404, return synthetic Claude-like SSE with model list
         if status == StatusCode::NOT_FOUND {
@@ -1214,6 +1254,7 @@ async fn messages(
 
         let mut sse_parser = SseEventParser::new();
         let mut done = false;
+        let mut final_stop_reason = "end_turn"; // Default, will be updated if backend provides finish_reason
 
         log::debug!("🌊 Begin processing SSE from backend");
         while let Some(item) = bytes_stream.next().await {
@@ -1233,20 +1274,104 @@ async fn messages(
                     continue;
                 }
 
+                // First, try to parse as generic JSON to understand the structure
+                let json_value: serde_json::Result<Value> = serde_json::from_str(data);
                 let parsed: serde_json::Result<OAIStreamChunk> = serde_json::from_str(data);
+                
                 let chunk = match parsed {
                     Ok(c) => c,
                     Err(e) => {
-                        log::warn!("⚠️  JSON parse failed ({} chars): {}", data.len(), e);
+                        // Try to extract useful information from the raw JSON
+                        if let Ok(val) = json_value {
+                            // Check if it's an error response
+                            if let Some(error_obj) = val.get("error") {
+                                let error_msg = error_obj.get("message")
+                                    .or_else(|| error_obj.get("type"))
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("Unknown error");
+                                log::warn!("⚠️  Backend returned error in chunk: {}", error_msg);
+                                continue;
+                            }
+                            
+                            // Check if it's a valid JSON object but missing required fields
+                            if val.is_object() {
+                                let preview = if data.len() > 500 {
+                                    format!("{}...", &data[..500])
+                                } else {
+                                    data.to_string()
+                                };
+                                log::warn!("⚠️  Chunk missing 'choices' field ({} chars), structure: {}", data.len(), preview);
+                                continue;
+                            }
+                        }
+                        
+                        // Malformed JSON or unexpected format
+                        let preview = if data.len() > 500 {
+                            format!("{}...", &data[..500])
+                        } else {
+                            data.to_string()
+                        };
+                        log::warn!("⚠️  JSON parse failed ({} chars): {}\nResponse preview: {}", data.len(), e, preview);
                         continue;
                     }
                 };
+
+                // Handle error responses in parsed chunk
+                if let Some(error_val) = &chunk.error {
+                    let error_msg = error_val.get("message")
+                        .or_else(|| error_val.get("type"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("Unknown error");
+                    log::warn!("⚠️  Backend returned error: {}", error_msg);
+                    continue;
+                }
 
                 if chunk.choices.is_empty() {
                     log::debug!("⚠️  Chunk has no choices, skipping");
                     continue;
                 }
-                let d = &chunk.choices[0].delta;
+                
+                let choice = &chunk.choices[0];
+                
+                // Capture finish_reason if provided
+                if let Some(reason) = &choice.finish_reason {
+                    final_stop_reason = translate_finish_reason(Some(reason));
+                    log::debug!("📍 Backend finish_reason: {} → Claude stop_reason: {}", reason, final_stop_reason);
+                }
+                
+                // Handle non-streaming complete response (fallback)
+                if let Some(message) = &choice.message {
+                    log::debug!("📦 Received non-streaming complete response, converting to SSE");
+                    if let Some(content_str) = message.get("content").and_then(|v| v.as_str()) {
+                        if !text_open {
+                            text_index = next_block_index;
+                            let ev = json!({
+                                "type":"content_block_start",
+                                "index":text_index,
+                                "content_block":{"type":"text","text":""}
+                            });
+                            let _ = tx
+                                .send(Event::default().event("content_block_start").data(ev.to_string()))
+                                .await;
+                            text_open = true;
+                        }
+                        let ev = json!({
+                            "type":"content_block_delta",
+                            "index":text_index,
+                            "delta":{"type":"text_delta","text":content_str}
+                        });
+                        let _ = tx
+                            .send(Event::default().event("content_block_delta").data(ev.to_string()))
+                            .await;
+                    }
+                    continue;
+                }
+                
+                // Handle streaming delta response
+                let Some(d) = &choice.delta else {
+                    log::debug!("⚠️  Chunk has no delta or message, skipping");
+                    continue;
+                };
 
                 // Reasoning content (not displayed; we just acknowledge)
                 if let Some(r) = &d.reasoning_content {
@@ -1353,7 +1478,7 @@ async fn messages(
                 let data = payload.trim();
                 if data != "[DONE]" && !data.is_empty() {
                     if let Ok(chunk) = serde_json::from_str::<OAIStreamChunk>(data) {
-                        if let Some(c) = chunk.choices.get(0).and_then(|ch| ch.delta.content.as_ref()) {
+                        if let Some(c) = chunk.choices.get(0).and_then(|ch| ch.delta.as_ref()).and_then(|d| d.content.as_ref()) {
                             if !c.is_empty() {
                                 if !text_open {
                                     text_index = next_block_index;
@@ -1399,7 +1524,7 @@ async fn messages(
 
         let md = json!({
             "type":"message_delta",
-            "delta":{"stop_reason":"end_turn","stop_sequence":null},
+            "delta":{"stop_reason":final_stop_reason,"stop_sequence":null},
             "usage":{"output_tokens":0}
         });
         let _ = tx
