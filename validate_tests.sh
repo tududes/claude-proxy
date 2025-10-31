@@ -20,9 +20,9 @@ FAIL=0
 check_file() {
   local file=$1
   local errors=0
-  
+
   echo -e "${YELLOW}Checking: ${file}${NC}"
-  
+
   # Check 1: Uses /v1/messages endpoint
   if grep -q "/v1/messages" "$file"; then
     echo -e "  ${GREEN}✓${NC} Uses /v1/messages endpoint"
@@ -30,7 +30,7 @@ check_file() {
     echo -e "  ${RED}✗${NC} Missing /v1/messages endpoint"
     ((errors++))
   fi
-  
+
   # Check 2: Includes Content-Type header
   if grep -q "content-type.*application/json" "$file"; then
     echo -e "  ${GREEN}✓${NC} Sets Content-Type: application/json"
@@ -38,38 +38,38 @@ check_file() {
     echo -e "  ${RED}✗${NC} Missing Content-Type header"
     ((errors++))
   fi
-  
+
   # Check 3: Uses MODEL from env
-  if grep -q "MODEL" "$file" && grep -q '\\"model\\".*\${MODEL}' "$file"; then
+  if grep -q "MODEL" "$file" && grep -q '\"model\".*\${MODEL}' "$file"; then
     echo -e "  ${GREEN}✓${NC} Uses MODEL from environment"
   else
     echo -e "  ${YELLOW}⚠${NC}  Should use MODEL from .env"
   fi
-  
+
   # Check 4: Includes messages array
-  if grep -q '\\"messages\\"' "$file"; then
+  if grep -q '\"messages\"' "$file"; then
     echo -e "  ${GREEN}✓${NC} Includes messages array"
   else
     echo -e "  ${RED}✗${NC} Missing messages array"
     ((errors++))
   fi
-  
+
   # Check 5: Sets stream: true
-  if grep -q '\\"stream\\":.*true' "$file"; then
+  if grep -q '\"stream\":.*true' "$file"; then
     echo -e "  ${GREEN}✓${NC} Sets stream: true"
   else
     echo -e "  ${RED}✗${NC} Missing stream: true"
     ((errors++))
   fi
-  
+
   # Check 6: Includes max_tokens
-  if grep -q '\\"max_tokens\\"' "$file"; then
+  if grep -q '\"max_tokens\"' "$file"; then
     echo -e "  ${GREEN}✓${NC} Includes max_tokens"
   else
     echo -e "  ${RED}✗${NC} Missing max_tokens"
     ((errors++))
   fi
-  
+
   # Check 7: Checks for Claude SSE events (text, text_delta, message_start, content_block, tool_use)
   # Note: Simple passthrough tests (like test_request.sh) can skip validation for manual inspection
   if grep -qE "(text_delta|message_start|content_block|grep.*text|tool_use)" "$file"; then
@@ -80,16 +80,16 @@ check_file() {
     echo -e "  ${RED}✗${NC} Doesn't check for Claude SSE events"
     ((errors++))
   fi
-  
+
   # Check 8: Uses Authorization header properly
   if grep -q "Authorization.*Bearer" "$file"; then
     echo -e "  ${GREEN}✓${NC} Uses Authorization: Bearer header"
   else
     echo -e "  ${YELLOW}⚠${NC}  No Authorization header (optional)"
   fi
-  
+
   echo ""
-  
+
   if [ $errors -eq 0 ]; then
     echo -e "  ${GREEN}✓ PASS${NC} - Compliant with Claude API spec"
     ((PASS++))
@@ -97,7 +97,7 @@ check_file() {
     echo -e "  ${RED}✗ FAIL${NC} - ${errors} compliance issue(s)"
     ((FAIL++))
   fi
-  
+
   echo ""
 }
 
@@ -121,7 +121,6 @@ if [ $FAIL -eq 0 ]; then
   echo -e "${GREEN}✓ All test scripts are compliant with Claude Messages API spec!${NC}"
   exit 0
 else
-  echo -e "${RED}✗ Some test scripts need fixes. See CLAUDE_API_SPEC.md for details.${NC}"
+  echo -e "${RED}✗ Some test scripts need fixes. See API_REFERENCE.md for details.${NC}"
   exit 1
 fi
-

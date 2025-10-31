@@ -169,7 +169,7 @@ curl -N http://localhost:8080/v1/messages \
   }'
 ```
 
-See [docs/CLAUDE_CODE_SUPPORT.md](docs/CLAUDE_CODE_SUPPORT.md) for complete API documentation and all 9 Claude Code patterns.
+See [docs/API_REFERENCE.md](docs/API_REFERENCE.md) for complete API documentation and all 9 Claude Code patterns.
 
 ## Image Support
 

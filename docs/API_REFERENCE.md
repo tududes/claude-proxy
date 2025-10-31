@@ -1,8 +1,158 @@
-# Claude Code Support Matrix
+# Claude Messages API Specification Reference
 
-This proxy fully supports all known request patterns from Claude Code.
+This document ensures all test scripts conform to the official Claude Messages API specification.
 
-## Supported Request Formats
+## Required Format
+
+### Endpoint
+```
+POST /v1/messages
+```
+
+### Required Headers
+```
+Content-Type: application/json
+Authorization: Bearer {API_KEY}  # Optional, can be configured in .env
+```
+
+### Request Body (JSON)
+
+**Required fields:**
+```json
+{
+  "model": "string",           // Model identifier (e.g., "claude-3-5-sonnet-20241022")
+  "messages": [...],           // Array of message objects
+  "max_tokens": integer,       // Maximum tokens to generate
+  "stream": boolean            // true for SSE streaming
+}
+```
+
+**Optional fields:**
+```json
+{
+  "system": "string",          // System prompt
+  "temperature": float,        // 0.0 to 1.0
+  "top_p": float,             // Nucleus sampling
+  "top_k": integer,           // Top-k sampling
+  "stop_sequences": [...],    // Array of stop strings
+  "tools": [...]              // Tool/function definitions
+}
+```
+
+### Message Format
+```json
+{
+  "role": "user" | "assistant",
+  "content": "string" | [...]   // String or array of content blocks
+}
+```
+
+### Tool Definition Format
+```json
+{
+  "name": "string",
+  "description": "string",
+  "input_schema": {
+    "type": "object",
+    "properties": {...},
+    "required": [...]
+  }
+}
+```
+
+## Expected Response (SSE Streaming)
+
+### Event Types (in order):
+
+1. **message_start**
+```json
+{
+  "type": "message_start",
+  "message": {
+    "id": "msg_...",
+    "type": "message",
+    "role": "assistant",
+    "content": [],
+    "model": "...",
+    "stop_reason": null,
+    "stop_sequence": null,
+    "usage": {"input_tokens": 0, "output_tokens": 0}
+  }
+}
+```
+
+2. **content_block_start**
+```json
+{
+  "type": "content_block_start",
+  "index": 0,
+  "content_block": {"type": "text", "text": ""}
+}
+```
+
+3. **content_block_delta** (multiple)
+```json
+{
+  "type": "content_block_delta",
+  "index": 0,
+  "delta": {"type": "text_delta", "text": "chunk"}
+}
+```
+
+4. **content_block_stop**
+```json
+{
+  "type": "content_block_stop",
+  "index": 0
+}
+```
+
+5. **message_delta**
+```json
+{
+  "type": "message_delta",
+  "delta": {"stop_reason": "end_turn", "stop_sequence": null},
+  "usage": {"output_tokens": N}
+}
+```
+
+6. **message_stop**
+```json
+{
+  "type": "message_stop"
+}
+```
+
+### Tool Use Events
+
+For tool calls:
+```json
+{
+  "type": "content_block_start",
+  "index": N,
+  "content_block": {
+    "type": "tool_use",
+    "id": "toolu_...",
+    "name": "function_name",
+    "input": {}
+  }
+}
+```
+
+```json
+{
+  "type": "content_block_delta",
+  "index": N,
+  "delta": {
+    "type": "input_json_delta",
+    "partial_json": "{\"arg\":"
+  }
+}
+```
+
+## Supported Features
+
+The proxy fully supports all known request patterns from Claude Code:
 
 ### 1. String Content
 ```json
@@ -50,8 +200,8 @@ Claude Code uses for: Structured text messages
   ]
 }
 ```
-Claude Code uses for: Analyzing images, screenshots  
-Conversion: Claude base64 → OpenAI data URI format `data:image/png;base64,...`  
+Claude Code uses for: Analyzing images, screenshots
+Conversion: Claude base64 → OpenAI data URI format `data:image/png;base64,...`
 Backend Requirements: Vision-capable model (GPT-4V, GPT-4o, Claude 3.5 Sonnet)
 
 ### 4. System Prompts
@@ -64,7 +214,7 @@ Backend Requirements: Vision-capable model (GPT-4V, GPT-4o, Claude 3.5 Sonnet)
 
 **Claude Code uses for:** Setting behavior, context, role
 
-### 5. Multi-Turn Conversations 
+### 5. Multi-Turn Conversations
 ```json
 {
   "messages": [
@@ -77,7 +227,7 @@ Backend Requirements: Vision-capable model (GPT-4V, GPT-4o, Claude 3.5 Sonnet)
 
 **Claude Code uses for:** Maintaining conversation context, follow-ups
 
-### 6. Tool Definitions 
+### 6. Tool Definitions
 ```json
 {
   "tools": [
@@ -94,10 +244,10 @@ Backend Requirements: Vision-capable model (GPT-4V, GPT-4o, Claude 3.5 Sonnet)
 }
 ```
 
-**Claude Code uses for:** File operations, terminal commands, code editing  
+**Claude Code uses for:** File operations, terminal commands, code editing
 **Format:** Uses `input_schema` (not OpenAI's `parameters`)
 
-### 7. Tool Results 
+### 7. Tool Results
 ```json
 {
   "messages": [
@@ -115,11 +265,11 @@ Backend Requirements: Vision-capable model (GPT-4V, GPT-4o, Claude 3.5 Sonnet)
 }
 ```
 
-**Claude Code uses for:** Returning tool execution results  
-**Conversion:** Splits `tool_result` blocks into OpenAI `{"role": "tool", "tool_call_id": "..."}` format  
+**Claude Code uses for:** Returning tool execution results
+**Conversion:** Splits `tool_result` blocks into OpenAI `{"role": "tool", "tool_call_id": "..."}` format
 **Note:** Backend receives properly formatted tool messages for function calling flow
 
-### 8. Temperature & Top-P 
+### 8. Temperature & Top-P
 ```json
 {
   "temperature": 0.7,
@@ -129,7 +279,7 @@ Backend Requirements: Vision-capable model (GPT-4V, GPT-4o, Claude 3.5 Sonnet)
 
 **Claude Code uses for:** Controlling randomness/creativity
 
-### 9. Stop Sequences 
+### 9. Stop Sequences
 ```json
 {
   "stop_sequences": ["\n\n", "---"]
@@ -202,15 +352,6 @@ delta: {content:"hi"}    →       event: content_block_    →      event: cont
                                  delta", text:"hi"}               delta", text:"hi"}
 ```
 
-## Testing
-
-Run validation:
-```bash
-./tests/test_claude_code_patterns.sh    # Tests all 9 patterns
-```
-
-All patterns supported. See `tests/README.md` for test documentation.
-
 ## Backend Compatibility
 
 The proxy **fully converts** all Claude content types to OpenAI format:
@@ -250,4 +391,27 @@ Tested against 4 reference implementations (1rgs, fuergaosi233, istarwyh, ujisat
 Backend requirements:
 - Vision: GPT-4V, GPT-4o, or Claude 3.5 Sonnet
 - Tools: Any backend with function calling support
+
+## Current Test Scripts
+
+All core tests comply with the specification. Run `./validate_tests.sh` to verify.
+
+## References
+
+- [Claude Messages API Documentation](https://docs.anthropic.com/claude/reference/messages_post)
+- [Claude Tool Use Guide](https://docs.anthropic.com/claude/docs/tool-use)
+- [SSE Event Stream Format](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events)
+- [CLAUDE_CODE_SUPPORT.md (Legacy)](CLAUDE_CODE_SUPPORT.md) - This file is being consolidated into this document and will be deleted after consolidation is complete.
+
+## Common Mistakes to Avoid
+
+1. Using `/v1/chat/completions` (OpenAI format) - should be `/v1/messages`
+2. Checking for `choices` array - Claude uses `content` array
+3. Looking for `delta.content` - Claude uses `delta.text`
+4. Missing `stream: true` - required for SSE responses
+5. Wrong tool format - must use `input_schema` not `parameters`
+6. Forgetting `max_tokens` - required in Claude API
+7. Not supporting image content - must convert Claude base64 to OpenAI data URI format
+8. Not handling tool results properly - must split `tool_result` blocks into separate `role: "tool"` messages
+9. Not translating `finish_reason` properly - must map OpenAI reasons to Claude reasons (stop→end_turn, length→max_tokens, etc.)
 
