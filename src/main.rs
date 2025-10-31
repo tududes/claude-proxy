@@ -2,7 +2,7 @@ use axum::{
     extract::State,
     http::{header::AUTHORIZATION, HeaderMap, HeaderName, StatusCode},
     response::sse::{Event, Sse},
-    routing::post,
+    routing::{get, post},
     Router,
 };
 use futures::{Stream, StreamExt};
@@ -199,13 +199,65 @@ struct ModelInfo {
     supported_features: Vec<String>,
 }
 
-// ---------- App with cached models ----------
+// ---------- App with cached models and circuit breaker ----------
 #[derive(Clone)]
 struct App {
     client: reqwest::Client,
     backend_url: String,
     backend_key: Option<String>,
     models_cache: Arc<RwLock<Option<Vec<ModelInfo>>>>,
+    circuit_breaker: Arc<RwLock<CircuitBreakerState>>,
+}
+
+// ---------- Circuit breaker state ----------
+#[derive(Clone, Debug)]
+struct CircuitBreakerState {
+    consecutive_failures: u32,
+    last_failure_time: Option<SystemTime>,
+    is_open: bool,
+}
+
+impl CircuitBreakerState {
+    fn new() -> Self {
+        Self {
+            consecutive_failures: 0,
+            last_failure_time: None,
+            is_open: false,
+        }
+    }
+
+    fn record_success(&mut self) {
+        self.consecutive_failures = 0;
+        self.is_open = false;
+        self.last_failure_time = None;
+    }
+
+    fn record_failure(&mut self) {
+        self.consecutive_failures += 1;
+        self.last_failure_time = Some(SystemTime::now());
+        if self.consecutive_failures >= 5 {
+            self.is_open = true;
+            warn!("🔴 Circuit breaker opened after {} consecutive failures", self.consecutive_failures);
+        }
+    }
+
+    fn should_allow_request(&mut self) -> bool {
+        if !self.is_open {
+            return true;
+        }
+        // Try to recover after 30 seconds
+        if let Some(last_fail) = self.last_failure_time {
+            if let Ok(elapsed) = SystemTime::now().duration_since(last_fail) {
+                if elapsed.as_secs() >= 30 {
+                    info!("🟡 Circuit breaker attempting half-open state");
+                    self.is_open = false;
+                    self.consecutive_failures = 0;
+                    return true;
+                }
+            }
+        }
+        false
+    }
 }
 
 #[tokio::main]
@@ -217,6 +269,10 @@ async fn main() {
     let backend_url = env::var("BACKEND_URL")
         .unwrap_or_else(|_| "http://127.0.0.1:8000/v1/chat/completions".into());
     let backend_key = env::var("BACKEND_KEY").ok();
+    let backend_timeout_secs = env::var("BACKEND_TIMEOUT_SECS")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(600);
 
     info!("🚀 Claude-to-OpenAI Proxy starting...");
     info!("   Backend URL: {}", backend_url);
@@ -224,21 +280,24 @@ async fn main() {
         "   Backend Key: {}",
         if backend_key.is_some() { "Set (fallback)" } else { "Not set" }
     );
+    info!("   Backend Timeout: {}s", backend_timeout_secs);
     info!("   Mode: Passthrough with case-correction");
 
     let models_cache = Arc::new(RwLock::new(None));
+    let circuit_breaker = Arc::new(RwLock::new(CircuitBreakerState::new()));
 
     let app = App {
         client: reqwest::Client::builder()
             .pool_max_idle_per_host(1024)
             .tcp_keepalive(Some(Duration::from_secs(60)))
             .connect_timeout(Duration::from_secs(10))
-            .timeout(Duration::from_secs(600))
+            .timeout(Duration::from_secs(backend_timeout_secs))
             .build()
             .unwrap(),
         backend_url: backend_url.clone(),
         backend_key,
         models_cache: models_cache.clone(),
+        circuit_breaker: circuit_breaker.clone(),
     };
 
     // Background model cache refresh (every 60s)
@@ -255,8 +314,11 @@ async fn main() {
     }
 
     let router = Router::new()
+        .route("/health", get(health_check))
         .route("/v1/messages", post(messages))
         .route("/v1/messages/count_tokens", post(count_tokens))
+        .layer(axum::extract::DefaultBodyLimit::max(10 * 1024 * 1024)) // 10MB limit
+        .layer(tower_http::compression::CompressionLayer::new())
         .with_state(app);
 
     let port = env::var("HOST_PORT")
@@ -469,6 +531,7 @@ fn translate_finish_reason(oai_reason: Option<&str>) -> &'static str {
         Some("length") => "max_tokens",
         Some("tool_calls") | Some("function_call") => "tool_use",
         Some("content_filter") => "end_turn", // No direct equivalent
+        Some("error") => "error",
         Some(other) => {
             log::debug!("⚠️  Unknown finish_reason '{}', using 'end_turn'", other);
             "end_turn"
@@ -494,6 +557,50 @@ fn get_price_tier(input_price: Option<f64>, output_price: Option<f64>) -> &'stat
     } else {
         "$$$$"
     }
+}
+
+/// Format backend error into user-friendly structured message
+fn format_backend_error(error_msg: &str, raw_json: &str) -> String {
+    // Try to extract model name from context if available
+    let model_name = if let Ok(val) = serde_json::from_str::<Value>(raw_json) {
+        val.get("model")
+            .and_then(|m| m.as_str())
+            .map(String::from)
+    } else {
+        None
+    };
+    
+    let mut formatted = String::from("⚠️ Backend Error\n\n");
+    
+    if let Some(model) = model_name {
+        formatted.push_str(&format!("Model: {}\n", model));
+    }
+    
+    formatted.push_str(&format!("Error: {}\n\n", error_msg));
+    
+    // Add specific suggestions based on error type
+    if error_msg.contains("token") && error_msg.contains("exceed") {
+        if let Some(requested) = error_msg.split("total of ").nth(1).and_then(|s| s.split(" tokens").next()) {
+            formatted.push_str(&format!("Requested: {} tokens\n", requested));
+        }
+        if let Some(limit) = error_msg.split("maximum context length of ").nth(1).and_then(|s| s.split(" tokens").next()) {
+            formatted.push_str(&format!("Limit: {} tokens\n\n", limit));
+        }
+        formatted.push_str("💡 Suggestions:\n");
+        formatted.push_str("• Reduce message history\n");
+        formatted.push_str("• Use a model with larger context\n");
+        formatted.push_str("• Decrease max_tokens parameter\n");
+    } else if error_msg.contains("rate limit") {
+        formatted.push_str("💡 Suggestions:\n");
+        formatted.push_str("• Wait a moment before retrying\n");
+        formatted.push_str("• Check your API quota\n");
+    } else if error_msg.contains("insufficient") || error_msg.contains("quota") {
+        formatted.push_str("💡 Suggestions:\n");
+        formatted.push_str("• Check your account balance\n");
+        formatted.push_str("• Verify API key permissions\n");
+    }
+    
+    formatted
 }
 
 /// Build markdown content for synthetic 404 response listing available models
@@ -640,6 +747,28 @@ fn extract_text_from_content(content: &Value) -> (String, usize) {
         return (texts.join("\n"), image_count);
     }
     (String::new(), 0)
+}
+
+/// Health check endpoint
+async fn health_check(State(app): State<App>) -> axum::Json<Value> {
+    let models = get_available_models(&app).await;
+    let circuit_breaker = app.circuit_breaker.read().await;
+    
+    let status = if circuit_breaker.is_open {
+        "unhealthy"
+    } else {
+        "healthy"
+    };
+    
+    axum::Json(json!({
+        "status": status,
+        "backend_url": app.backend_url,
+        "models_cached": models.len(),
+        "circuit_breaker": {
+            "is_open": circuit_breaker.is_open,
+            "consecutive_failures": circuit_breaker.consecutive_failures
+        }
+    }))
 }
 
 /// Count tokens using tiktoken (cl100k_base encoding baseline)
@@ -793,6 +922,44 @@ async fn messages(
     (HeaderMap, Sse<impl Stream<Item = Result<Event, Infallible>>>),
     (StatusCode, &'static str),
 > {
+    let request_start = SystemTime::now();
+    
+    // Circuit breaker check
+    {
+        let mut cb = app.circuit_breaker.write().await;
+        if !cb.should_allow_request() {
+            error!("🔴 Circuit breaker is open - rejecting request");
+            return Err((StatusCode::SERVICE_UNAVAILABLE, "backend_unavailable_circuit_open"));
+        }
+    }
+    
+    // Request validation
+    if cr.messages.is_empty() {
+        warn!("❌ Validation failed: empty messages");
+        return Err((StatusCode::BAD_REQUEST, "empty_messages"));
+    }
+    
+    if cr.messages.len() > 1000 {
+        warn!("❌ Validation failed: too many messages ({})", cr.messages.len());
+        return Err((StatusCode::BAD_REQUEST, "too_many_messages"));
+    }
+    
+    // Validate message size (rough check)
+    let total_content_size: usize = cr.messages.iter()
+        .map(|m| {
+            if let Some(s) = m.content.as_str() {
+                s.len()
+            } else {
+                serde_json::to_string(&m.content).unwrap_or_default().len()
+            }
+        })
+        .sum();
+    
+    if total_content_size > 5 * 1024 * 1024 {  // 5MB content limit
+        warn!("❌ Validation failed: content too large ({} bytes)", total_content_size);
+        return Err((StatusCode::PAYLOAD_TOO_LARGE, "content_too_large"));
+    }
+    
     // Debug: Log incoming headers (names only)
     log::debug!("📥 Incoming headers:");
     for (name, _) in headers.iter() {
@@ -831,6 +998,7 @@ async fn messages(
 
     // Normalize model name (case-correction only)
     let backend_model = normalize_model_name(&cr.model, &app.models_cache).await;
+    let backend_model_for_metrics = backend_model.clone();
     let mut msgs = Vec::with_capacity(cr.messages.len() + 1);
     if let Some(sys) = cr.system {
         let system_content = convert_system_content(&sys);
@@ -1108,6 +1276,13 @@ async fn messages(
     log::debug!("🚀 Sending request to backend with {} messages", oai.messages.len());
     let res = req.json(&oai).send().await.map_err(|e| {
         error!("❌ Backend connection failed: {}", e);
+        // Record circuit breaker failure
+        tokio::spawn({
+            let cb = app.circuit_breaker.clone();
+            async move {
+                cb.write().await.record_failure();
+            }
+        });
         (StatusCode::BAD_GATEWAY, "backend_unavailable")
     })?;
 
@@ -1130,6 +1305,14 @@ async fn messages(
     }
 
     if !status.is_success() {
+        // Record circuit breaker failure
+        tokio::spawn({
+            let cb = app.circuit_breaker.clone();
+            async move {
+                cb.write().await.record_failure();
+            }
+        });
+        
         // If 404, return synthetic Claude-like SSE with model list
         if status == StatusCode::NOT_FOUND {
             let models = get_available_models(&app).await;
@@ -1255,6 +1438,7 @@ async fn messages(
         let mut sse_parser = SseEventParser::new();
         let mut done = false;
         let mut final_stop_reason = "end_turn"; // Default, will be updated if backend provides finish_reason
+        let mut fatal_error = false;
 
         log::debug!("🌊 Begin processing SSE from backend");
         while let Some(item) = bytes_stream.next().await {
@@ -1289,8 +1473,60 @@ async fn messages(
                                     .or_else(|| error_obj.get("type"))
                                     .and_then(|v| v.as_str())
                                     .unwrap_or("Unknown error");
-                                log::warn!("⚠️  Backend returned error in chunk: {}", error_msg);
-                                continue;
+                                let error_details = if error_msg.is_empty() {
+                                    serde_json::to_string(error_obj).unwrap_or_else(|_| "Unknown backend error".into())
+                                } else {
+                                    error_msg.to_string()
+                                };
+                                
+                                log::warn!("⚠️  Backend returned error in chunk: {}", error_details);
+
+                                // Close any open text block before emitting the error
+                                if text_open {
+                                    let stop = json!({"type":"content_block_stop","index":text_index});
+                                    let _ = tx
+                                        .send(Event::default().event("content_block_stop").data(stop.to_string()))
+                                        .await;
+                                    text_open = false;
+                                }
+
+                                // Emit error message to the client as a text block
+                                let error_index = next_block_index;
+                                next_block_index += 1;
+
+                                let start = json!({
+                                    "type":"content_block_start",
+                                    "index":error_index,
+                                    "content_block":{"type":"text","text":""}
+                                });
+                                let _ = tx
+                                    .send(Event::default().event("content_block_start").data(start.to_string()))
+                                    .await;
+
+                                // Format structured error message
+                                let formatted_error = format_backend_error(&error_details, data);
+                                
+                                let delta = json!({
+                                    "type":"content_block_delta",
+                                    "index":error_index,
+                                    "delta":{"type":"text_delta","text":formatted_error}
+                                });
+                                let _ = tx
+                                    .send(Event::default().event("content_block_delta").data(delta.to_string()))
+                                    .await;
+
+                                let stop = json!({
+                                    "type":"content_block_stop",
+                                    "index":error_index
+                                });
+                                let _ = tx
+                                    .send(Event::default().event("content_block_stop").data(stop.to_string()))
+                                    .await;
+
+                                final_stop_reason = "error";
+                                done = true;
+                                fatal_error = true;
+                                break;
                             }
                             
                             // Check if it's a valid JSON object but missing required fields
@@ -1318,12 +1554,65 @@ async fn messages(
 
                 // Handle error responses in parsed chunk
                 if let Some(error_val) = &chunk.error {
-                    let error_msg = error_val.get("message")
+                    let error_msg = error_val
+                        .get("message")
                         .or_else(|| error_val.get("type"))
                         .and_then(|v| v.as_str())
                         .unwrap_or("Unknown error");
-                    log::warn!("⚠️  Backend returned error: {}", error_msg);
-                    continue;
+                    let error_details = if error_msg.is_empty() {
+                        serde_json::to_string(error_val).unwrap_or_else(|_| "Unknown backend error".into())
+                    } else {
+                        error_msg.to_string()
+                    };
+
+                    log::warn!("⚠️  Backend returned error: {}", error_details);
+
+                    // Close any open text block before emitting the error
+                    if text_open {
+                        let stop = json!({"type":"content_block_stop","index":text_index});
+                        let _ = tx
+                            .send(Event::default().event("content_block_stop").data(stop.to_string()))
+                            .await;
+                        text_open = false;
+                    }
+
+                    // Emit error message to the client as a text block
+                    let error_index = next_block_index;
+                    next_block_index += 1;
+
+                    let start = json!({
+                        "type":"content_block_start",
+                        "index":error_index,
+                        "content_block":{"type":"text","text":""}
+                    });
+                    let _ = tx
+                        .send(Event::default().event("content_block_start").data(start.to_string()))
+                        .await;
+
+                                // Format structured error message
+                                let formatted_error = format_backend_error(&error_details, data);
+                                
+                                let delta = json!({
+                                    "type":"content_block_delta",
+                                    "index":error_index,
+                                    "delta":{"type":"text_delta","text":formatted_error}
+                                });
+                    let _ = tx
+                        .send(Event::default().event("content_block_delta").data(delta.to_string()))
+                        .await;
+
+                    let stop = json!({
+                        "type":"content_block_stop",
+                        "index":error_index
+                    });
+                    let _ = tx
+                        .send(Event::default().event("content_block_stop").data(stop.to_string()))
+                        .await;
+
+                    final_stop_reason = "error";
+                    done = true;
+                    fatal_error = true;
+                    break;
                 }
 
                 if chunk.choices.is_empty() {
@@ -1467,6 +1756,10 @@ async fn messages(
                 }
             }
 
+            if fatal_error {
+                break;
+            }
+
             if done {
                 break;
             }
@@ -1536,6 +1829,14 @@ async fn messages(
             .await;
 
         log::debug!("🏁 Streaming task completed");
+        
+        // Record circuit breaker success if no fatal error
+        if !fatal_error {
+            let cb_clone = app.circuit_breaker.clone();
+            tokio::spawn(async move {
+                cb_clone.write().await.record_success();
+            });
+        }
     });
 
     let mut out_headers = HeaderMap::new();
@@ -1544,5 +1845,14 @@ async fn messages(
     out_headers.insert("x-accel-buffering", "no".parse().unwrap());
 
     let stream = ReceiverStream::new(rx).map(Ok::<Event, Infallible>);
+    
+    // Log structured metrics
+    if let Ok(elapsed) = request_start.elapsed() {
+        info!(target: "metrics",
+            "request_completed: model={}, duration_ms={}, messages={}, status=success",
+            backend_model_for_metrics, elapsed.as_millis(), original_message_count
+        );
+    }
+    
     Ok((out_headers, Sse::new(stream)))
 }
