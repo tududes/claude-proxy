@@ -1,6 +1,8 @@
-{$CADDY_DOMAIN:}:{$CADDY_PORT:443} {
+# When CADDY_TLS=false, CADDY_PROTOCOL will be "http://"
+# When CADDY_TLS=true or unset, CADDY_PROTOCOL will be empty (enables auto-HTTPS)
+{$CADDY_PROTOCOL:}{$CADDY_DOMAIN:}:{$CADDY_PORT:443} {
 	reverse_proxy claude-proxy:{$HOST_PORT:8181}
 }
 
-# Port 80 is only used for ACME challenges (handled automatically by Caddy)
-# No site block needed - Caddy will use port 80 for challenge validation only
+# Port 80 is only used for ACME challenges when TLS is enabled
+# When CADDY_TLS=false, this is ignored and only the main port is used

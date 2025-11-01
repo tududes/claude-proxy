@@ -90,6 +90,11 @@ Create a `.env` file:
 BACKEND_URL=https://llm.chutes.ai/v1/chat/completions
 BACKEND_KEY=cpk_your_api_key           # Optional fallback
 
+# Caddy (optional, for SSL/TLS)
+CADDY_TLS=true                          # Set to false for plaintext HTTP
+CADDY_DOMAIN=                           # Your domain (optional)
+CADDY_PORT=8180                         # Default Caddy port
+
 # Testing
 CHUTES_TEST_API_KEY=cpk_your_key       # For test suite
 

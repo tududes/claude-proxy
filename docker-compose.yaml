@@ -30,12 +30,15 @@ services:
       - HOST_PORT=${HOST_PORT:-8181}
       - CADDY_DOMAIN=${CADDY_DOMAIN:-}
       - CADDY_PORT=${CADDY_PORT:-8180}
+      - CADDY_TLS=${CADDY_TLS:-true}
     ports:
       - "${CADDY_PORT:-8180}:${CADDY_PORT:-8180}"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile
+      - ./caddy-entrypoint.sh:/caddy-entrypoint.sh:ro
       - caddy_data:/data
       - caddy_config:/config
+    entrypoint: ["/caddy-entrypoint.sh"]
     depends_on:
       - claude-proxy
     restart: unless-stopped

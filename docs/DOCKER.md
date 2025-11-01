@@ -26,6 +26,11 @@ export BACKEND_KEY=your-api-key-here
 
 # Log level (default: info)
 export RUST_LOG=debug
+
+# Caddy TLS configuration (default: true)
+export CADDY_TLS=false          # Set to false for plaintext HTTP
+export CADDY_DOMAIN=            # Your domain (optional)
+export CADDY_PORT=8180          # Caddy port (default: 8180)
 ```
 
 Or create a `.env` file:
@@ -34,6 +39,11 @@ Or create a `.env` file:
 BACKEND_URL=https://llm.chutes.ai/v1/chat/completions
 BACKEND_KEY=
 RUST_LOG=info
+
+# Caddy configuration (optional)
+CADDY_TLS=true
+CADDY_DOMAIN=
+CADDY_PORT=8180
 ```
 
 ## Usage Examples
@@ -105,11 +115,41 @@ docker-compose up -d
 docker-compose exec claude-proxy /bin/bash
 ```
 
+## Caddy TLS Configuration
+
+The docker-compose setup includes Caddy for optional SSL/TLS termination.
+
+### Plaintext HTTP (Development)
+```bash
+export CADDY_TLS=false
+docker-compose up -d
+# Access at http://localhost:8180
+```
+
+### Auto-HTTPS with Let's Encrypt (Production)
+```bash
+export CADDY_TLS=true
+export CADDY_DOMAIN=your-domain.com
+export CADDY_PORT=443
+docker-compose up -d
+# Caddy automatically provisions SSL certificate
+# Access at https://your-domain.com
+```
+
+### How it works
+- `CADDY_TLS=true` (default): Caddy enables auto-HTTPS with automatic certificate provisioning
+- `CADDY_TLS=false`: Caddy runs in plaintext mode, no SSL/TLS overhead
+- The entrypoint script (`caddy-entrypoint.sh`) sets the protocol prefix based on `CADDY_TLS`
+
 ## Production Deployment
 
 For production, consider:
 
-1. **Use a reverse proxy** (nginx, traefik) with SSL/TLS
+1. **Built-in Caddy with TLS** (recommended):
+```bash
+CADDY_TLS=true CADDY_DOMAIN=your-domain.com CADDY_PORT=443 docker-compose up -d
+```
+
 2. **Resource limits** in docker-compose.yaml:
 ```yaml
 deploy:
