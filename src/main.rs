@@ -28,7 +28,6 @@ async fn main() {
 
     let backend_url = env::var("BACKEND_URL")
         .unwrap_or_else(|_| "http://127.0.0.1:8000/v1/chat/completions".into());
-    let backend_key = env::var("BACKEND_KEY").ok();
     let backend_timeout_secs = env::var("BACKEND_TIMEOUT_SECS")
         .ok()
         .and_then(|s| s.parse::<u64>().ok())
@@ -36,10 +35,6 @@ async fn main() {
 
     info!("🚀 Claude-to-OpenAI Proxy starting...");
     info!("   Backend URL: {}", backend_url);
-    info!(
-        "   Backend Key: {}",
-        if backend_key.is_some() { "Set (fallback)" } else { "Not set" }
-    );
     info!("   Backend Timeout: {}s", backend_timeout_secs);
     info!("   Mode: Passthrough with case-correction");
 
@@ -55,7 +50,6 @@ async fn main() {
             .build()
             .unwrap(),
         backend_url: backend_url.clone(),
-        backend_key,
         models_cache: models_cache.clone(),
         circuit_breaker: circuit_breaker.clone(),
     };

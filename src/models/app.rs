@@ -20,7 +20,6 @@ pub struct ModelInfo {
 pub struct App {
     pub client: Client,
     pub backend_url: String,
-    pub backend_key: Option<String>,
     pub models_cache: Arc<RwLock<Option<Vec<ModelInfo>>>>,
     pub circuit_breaker: Arc<RwLock<CircuitBreakerState>>,
 }

@@ -296,31 +296,17 @@ pub async fn messages(
         .post(&app.backend_url)
         .header("content-type", "application/json");
 
-    // Smart auth routing:
-    // - If client sends backend-compatible key (e.g., cpk_*), forward it
-    // - If client sends Anthropic token (sk-ant-*), replace with BACKEND_KEY
-    // - If no client auth, use BACKEND_KEY as fallback
-    let mut forwarded_auth_token: Option<String> = None;
-    let mut fallback_backend_token: Option<String> = None;
-
+    // Auth: Forward client key to backend, or reject if invalid/missing
     if let Some(key) = &client_key {
         if key.contains("sk-ant-") {
-            log::info!("🔄 Auth: Replacing Anthropic OAuth token with BACKEND_KEY");
-        } else {
-            req = req.bearer_auth(key);
-            forwarded_auth_token = Some(key.clone());
-            log::info!("🔄 Auth: Forwarding client key to backend");
+            log::warn!("❌ Anthropic OAuth tokens (sk-ant-*) are not supported - use backend-compatible key (cpk_*)");
+            return Err((StatusCode::UNAUTHORIZED, "invalid_auth_token"));
         }
-    }
-
-    if forwarded_auth_token.is_none() {
-        if let Some(k) = &app.backend_key {
-            req = req.bearer_auth(k);
-            fallback_backend_token = Some(k.clone());
-            log::debug!("🔑 Using configured BACKEND_KEY");
-        } else {
-            log::warn!("⚠️  No BACKEND_KEY configured - backend request may fail auth");
-        }
+        req = req.bearer_auth(key);
+        log::info!("🔄 Auth: Forwarding client key to backend");
+    } else {
+        log::warn!("❌ No client API key provided");
+        return Err((StatusCode::UNAUTHORIZED, "missing_api_key"));
     }
 
     // Debug request body (image data truncated)
@@ -342,10 +328,9 @@ pub async fn messages(
                 }
                 log::info!("📸 Request contains image data (truncated in logs)");
             }
-            let auth_header_str = forwarded_auth_token
+            let auth_header_str = client_key
                 .as_ref()
                 .map(|k| format!("Bearer {}", mask_token(k)))
-                .or_else(|| fallback_backend_token.as_ref().map(|k| format!("Bearer {}", mask_token(k))))
                 .unwrap_or_else(|| "Not Set".into());
             log::debug!(
                 "\n------------------ Request to Backend ------------------\n\

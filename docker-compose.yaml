@@ -9,8 +9,6 @@ services:
       HOST_PORT: ${HOST_PORT:-8181}
       # Backend URL - change to your OpenAI-compatible backend
       BACKEND_URL: ${BACKEND_URL:-https://llm.chutes.ai/v1/chat/completions}
-      # Backend API key (optional, can use client's key)
-      BACKEND_KEY: ${BACKEND_KEY:-}
       # Log level
       RUST_LOG: ${RUST_LOG:-info}
     ports:
