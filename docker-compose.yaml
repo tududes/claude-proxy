@@ -15,7 +15,7 @@ services:
       - "${HOST_PORT:-8181}:${HOST_PORT:-8181}"
     restart: unless-stopped
     healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:${HOST_PORT:-8181}/v1/messages/count_tokens", "-H", "Content-Type: application/json", "-d", "{\"model\":\"test\",\"messages\":[]}" ]
+      test: [ "CMD", "curl", "-f", "http://localhost:${HOST_PORT:-8181}/health" ]
       interval: 30s
       timeout: 10s
       retries: 3
