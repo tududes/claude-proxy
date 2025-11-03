@@ -386,6 +386,16 @@ pub async fn messages(
             }
         });
 
+        // Read error response body
+        let error_body = res.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+        
+        log::error!(
+            "❌ Backend returned error: {} {} - {}",
+            status.as_u16(),
+            status.canonical_reason().unwrap_or(""),
+            error_body
+        );
+
         // If 404, return synthetic Claude-like SSE with model list
         if status == StatusCode::NOT_FOUND {
             let models = get_available_models(&app).await;
@@ -458,12 +468,66 @@ pub async fn messages(
                 return Ok((headers, Sse::new(stream)));
             }
         }
-        log::error!(
-            "❌ Backend returned error: {} {}",
-            status.as_u16(),
-            status.canonical_reason().unwrap_or("")
-        );
-        return Err((StatusCode::BAD_GATEWAY, "backend_error"));
+
+        // For all other errors, return proper SSE stream with error message
+        let (tx, rx) = tokio::sync::mpsc::channel::<Event>(64);
+        let error_msg = format_backend_error(&error_body, &error_body);
+        let model_name = backend_model_for_error.clone();
+
+        tokio::spawn(async move {
+            log::debug!("🎬 Synthetic error response task started");
+            let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+
+            let start = json!({
+                "type": "message_start",
+                "message": {
+                    "id": format!("msg_{}", now),
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [],
+                    "model": model_name,
+                    "stop_reason": Value::Null,
+                    "stop_sequence": Value::Null,
+                    "usage": { "input_tokens": 0, "output_tokens": 0 }
+                }
+            });
+            let _ = tx.send(Event::default().event("message_start").data(start.to_string())).await;
+
+            let block_start = json!({
+                "type": "content_block_start",
+                "index": 0,
+                "content_block": { "type": "text", "text": "" }
+            });
+            let _ = tx.send(Event::default().event("content_block_start").data(block_start.to_string())).await;
+
+            let delta = json!({
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": { "type": "text_delta", "text": error_msg }
+            });
+            let _ = tx.send(Event::default().event("content_block_delta").data(delta.to_string())).await;
+
+            let block_stop = json!({ "type": "content_block_stop", "index": 0 });
+            let _ = tx.send(Event::default().event("content_block_stop").data(block_stop.to_string())).await;
+
+            let msg_delta = json!({
+                "type": "message_delta",
+                "delta": { "stop_reason": "error", "stop_sequence": Value::Null },
+                "usage": { "output_tokens": 0 }
+            });
+            let _ = tx.send(Event::default().event("message_delta").data(msg_delta.to_string())).await;
+
+            let msg_stop = json!({ "type": "message_stop" });
+            let _ = tx.send(Event::default().event("message_stop").data(msg_stop.to_string())).await;
+            log::debug!("🏁 Synthetic error response completed");
+        });
+
+        let mut headers = HeaderMap::new();
+        headers.insert("cache-control", "no-cache".parse().unwrap());
+        headers.insert("connection", "keep-alive".parse().unwrap());
+        headers.insert("x-accel-buffering", "no".parse().unwrap());
+        let stream = ReceiverStream::new(rx).map(Ok::<Event, Infallible>);
+        return Ok((headers, Sse::new(stream)));
     }
 
     log::info!("✅ Backend responded successfully ({})", status);
