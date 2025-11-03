@@ -469,7 +469,20 @@ pub async fn messages(
             }
         }
 
-        // For all other errors, return proper SSE stream with error message
+        // For retryable errors (rate limits, server errors), pass through HTTP status
+        // so Claude Code can retry automatically
+        if matches!(status, 
+            StatusCode::TOO_MANY_REQUESTS |  // 429
+            StatusCode::INTERNAL_SERVER_ERROR |  // 500
+            StatusCode::BAD_GATEWAY |  // 502
+            StatusCode::SERVICE_UNAVAILABLE |  // 503
+            StatusCode::GATEWAY_TIMEOUT  // 504
+        ) {
+            log::info!("⚠️  Returning retryable error status {} for automatic retry", status);
+            return Err((status, "backend_error_retryable"));
+        }
+
+        // For non-retryable errors (auth, bad request), return formatted SSE message
         let (tx, rx) = tokio::sync::mpsc::channel::<Event>(64);
         let error_msg = format_backend_error(&error_body, &error_body);
         let model_name = backend_model_for_error.clone();
