@@ -451,7 +451,7 @@ BACKEND_TIMEOUT_SECS=300
 
 # Update docker-compose.yml healthcheck
 healthcheck:
-  test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+  test: ["CMD", "curl", "-f", "http://localhost:${HOST_PORT:-8181}/health"]
   interval: 30s
   timeout: 10s
   retries: 3
@@ -521,10 +521,8 @@ Conducted comprehensive review of `claude-proxy` to ensure bulletproof operation
    - Proper content block translation
    - Tool result serialization
 
-2. **Smart Authentication**
-   - Forwards backend-compatible keys
-   - Replaces Anthropic tokens
-   - Fallback to configured key
+2. **Authentication**
+   - Forwards client-provided backend-compatible keys
 
 3. **Model Discovery**
    - 60-second cache refresh
@@ -602,7 +600,7 @@ RUST_LOG=debug cargo run --release
 **Score:** 9.5/10
 **Strengths:** Bulletproof multi-format support, proper translations, comprehensive error handling
 
-**Remaining 0.5:** Low-priority nice-to-haves (rate limiting, configurable timeouts)
+**Remaining 0.5:** Low-priority nice-to-haves (rate limiting)
 
 ---
 

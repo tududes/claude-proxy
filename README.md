@@ -18,10 +18,10 @@ Routes Claude Code / Claude API requests to any OpenAI-compatible backend (SGLan
 
 ## Quick Start
 
-**Docker (default port 8181):**
+**Docker (default port 8180):**
 ```bash
 docker-compose up -d
-export ANTHROPIC_BASE_URL=http://localhost:8181
+export ANTHROPIC_BASE_URL=http://localhost:8180
 export ANTHROPIC_API_KEY=cpk_your_api_key
 claude
 ```
@@ -38,14 +38,16 @@ claude
 ## Configuration
 
 Environment variables:
-- `BACKEND_URL` - Backend chat completions endpoint (default: `http://127.0.0.1:8000/v1/chat/completions`)
+- `BACKEND_URL` - Backend chat completions endpoint.
+  - Default (source): `http://127.0.0.1:8000/v1/chat/completions`
+  - Default (Docker): `https://llm.chutes.ai/v1/chat/completions`
 - `HOST_PORT` - Port to listen on (default: `8080`)
 - `RUST_LOG` - Log level: `error`, `warn`, `info`, `debug`, `trace` (default: `info`)
 - `BACKEND_TIMEOUT_SECS` - Backend request timeout in seconds (default: `600`)
 
-**Example `.env`:**
+**Example `.env` (for running from source):**
 ```bash
-BACKEND_URL=https://llm.chutes.ai/v1/chat/completions
+BACKEND_URL=http://127.0.0.1:8000/v1/chat/completions
 HOST_PORT=8080
 RUST_LOG=info
 ```
@@ -148,7 +150,7 @@ cargo test              # Run unit tests
 
 ## Troubleshooting
 
-- **401 Unauthorized** - Ensure client sends valid backend-compatible API key (`cpk_*`). Anthropic OAuth tokens (`sk-ant-*`) are not supported.
+- **401 Unauthorized** - Ensure client sends a valid backend-compatible API key. The proxy forwards the client's `Authorization: Bearer <key>` directly to the backend. Anthropic OAuth tokens (`sk-ant-*`) are not supported.
 - **404 Model Not Found** - Use `/model` in Claude Code to see available models
-- **Circuit breaker open** - Backend failing; check health endpoint: `curl http://localhost:8080/health`
+- **Circuit breaker open** - Backend failing; check health endpoint: `curl http://localhost:8080/health` (or port 8180 for Docker)
 - **Debug logging** - `RUST_LOG=debug cargo run --release`

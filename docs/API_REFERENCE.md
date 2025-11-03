@@ -12,7 +12,7 @@ POST /v1/messages
 ### Required Headers
 ```
 Content-Type: application/json
-Authorization: Bearer {API_KEY}  # Optional, can be configured in .env
+Authorization: Bearer {API_KEY}  # Required. Forwarded to the backend.
 ```
 
 ### Request Body (JSON)
