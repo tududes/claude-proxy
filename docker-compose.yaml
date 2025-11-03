@@ -36,7 +36,7 @@ services:
       - ./caddy-entrypoint.sh:/caddy-entrypoint.sh:ro
       - caddy_data:/data
       - caddy_config:/config
-    entrypoint: ["/caddy-entrypoint.sh"]
+    entrypoint: [ "/caddy-entrypoint.sh" ]
     depends_on:
       - claude-proxy
     restart: unless-stopped
