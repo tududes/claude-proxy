@@ -9,6 +9,8 @@ services:
       HOST_PORT: ${HOST_PORT:-8181}
       # Backend URL - change to your OpenAI-compatible backend
       BACKEND_URL: ${BACKEND_URL:-https://llm.chutes.ai/v1/chat/completions}
+      # Circuit breaker (disabled by default)
+      ENABLE_CIRCUIT_BREAKER: ${ENABLE_CIRCUIT_BREAKER:-false}
       # Log level
       RUST_LOG: ${RUST_LOG:-info}
     ports:

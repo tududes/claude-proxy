@@ -21,6 +21,7 @@ pub async fn health_check(State(app): State<App>) -> Json<Value> {
         "backend_url": app.backend_url,
         "models_cached": models.len(),
         "circuit_breaker": {
+            "enabled": circuit_breaker.enabled,
             "is_open": circuit_breaker.is_open,
             "consecutive_failures": circuit_breaker.consecutive_failures
         }

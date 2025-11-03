@@ -12,7 +12,7 @@ Routes Claude Code / Claude API requests to any OpenAI-compatible backend (SGLan
 - Model discovery with 60s cache refresh
 - Case-insensitive model matching with helpful 404 responses
 - Token counting endpoint (tiktoken-based)
-- Circuit breaker (opens after 5 failures, recovers after 30s)
+- Optional circuit breaker (disabled by default, can be enabled via env)
 - Health check endpoint
 - Request validation (max 1000 messages, 5MB content)
 
@@ -44,12 +44,15 @@ Environment variables:
 - `HOST_PORT` - Port to listen on (default: `8080`)
 - `RUST_LOG` - Log level: `error`, `warn`, `info`, `debug`, `trace` (default: `info`)
 - `BACKEND_TIMEOUT_SECS` - Backend request timeout in seconds (default: `600`)
+- `ENABLE_CIRCUIT_BREAKER` - Enable circuit breaker protection (default: `false`)
+  - Opens after 5 consecutive failures, recovers after 30s
 
 **Example `.env` (for running from source):**
 ```bash
 BACKEND_URL=http://127.0.0.1:8000/v1/chat/completions
 HOST_PORT=8080
 RUST_LOG=info
+ENABLE_CIRCUIT_BREAKER=false
 ```
 
 **Authentication:**
@@ -61,7 +64,7 @@ RUST_LOG=info
 
 - `POST /v1/messages` - Main Claude Messages API endpoint
 - `POST /v1/messages/count_tokens` - Token counting (tiktoken-based)
-- `GET /health` - Health check with circuit breaker status
+- `GET /health` - Health check with circuit breaker status (if enabled)
 
 **Example request:**
 ```bash

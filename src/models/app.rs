@@ -31,14 +31,16 @@ pub struct CircuitBreakerState {
     pub consecutive_failures: u32,
     pub last_failure_time: Option<SystemTime>,
     pub is_open: bool,
+    pub enabled: bool,
 }
 
 impl CircuitBreakerState {
-    pub fn new() -> Self {
+    pub fn new(enabled: bool) -> Self {
         Self {
             consecutive_failures: 0,
             last_failure_time: None,
             is_open: false,
+            enabled,
         }
     }
 
@@ -58,6 +60,9 @@ impl CircuitBreakerState {
     }
 
     pub fn should_allow_request(&mut self) -> bool {
+        if !self.enabled {
+            return true;
+        }
         if !self.is_open {
             return true;
         }

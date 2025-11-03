@@ -32,14 +32,19 @@ async fn main() {
         .ok()
         .and_then(|s| s.parse::<u64>().ok())
         .unwrap_or(600);
+    let circuit_breaker_enabled = env::var("ENABLE_CIRCUIT_BREAKER")
+        .ok()
+        .and_then(|s| s.parse::<bool>().ok())
+        .unwrap_or(false);
 
     info!("🚀 Claude-to-OpenAI Proxy starting...");
     info!("   Backend URL: {}", backend_url);
     info!("   Backend Timeout: {}s", backend_timeout_secs);
+    info!("   Circuit Breaker: {}", if circuit_breaker_enabled { "enabled" } else { "disabled" });
     info!("   Mode: Passthrough with case-correction");
 
     let models_cache = Arc::new(RwLock::new(None));
-    let circuit_breaker = Arc::new(RwLock::new(CircuitBreakerState::new()));
+    let circuit_breaker = Arc::new(RwLock::new(CircuitBreakerState::new(circuit_breaker_enabled)));
 
     let app = App {
         client: reqwest::Client::builder()
