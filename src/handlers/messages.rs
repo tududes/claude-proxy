@@ -115,31 +115,20 @@ pub async fn messages(
         // Check if this is a reasoning model by querying model cache
         let is_reasoning_model = {
             let cache = app.models_cache.read().await;
-            if let Some(models) = cache.as_ref() {
-                // Look for model in cache
-                models.iter()
-                    .find(|m| m.id.eq_ignore_ascii_case(&backend_model))
-                    .map(|model_info| {
-                        // Check if model supports thinking features
-                        model_info.supported_features.iter().any(|f| {
-                            f.eq_ignore_ascii_case("thinking") || 
-                            f.eq_ignore_ascii_case("extended_thinking")
+            cache.as_ref()
+                .and_then(|models| {
+                    // Look for model in cache
+                    models.iter()
+                        .find(|m| m.id.eq_ignore_ascii_case(&backend_model))
+                        .map(|model_info| {
+                            // Check if model supports thinking features
+                            model_info.supported_features.iter().any(|f| {
+                                f.eq_ignore_ascii_case("thinking") || 
+                                f.eq_ignore_ascii_case("extended_thinking")
+                            })
                         })
-                    })
-                    .unwrap_or_else(|| {
-                        // Fallback to string matching if model not found in cache
-                        let lower = backend_model.to_lowercase();
-                        lower.contains("reasoning") || 
-                        lower.contains("r1") || 
-                        lower.contains("deepseek")
-                    })
-            } else {
-                // Cache not available, use string matching fallback
-                let lower = backend_model.to_lowercase();
-                lower.contains("reasoning") || 
-                lower.contains("r1") || 
-                lower.contains("deepseek")
-            }
+                })
+                .unwrap_or(false)  // Default to false if model not found
         };
         
         if is_reasoning_model {
