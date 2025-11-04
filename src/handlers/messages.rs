@@ -63,6 +63,26 @@ pub async fn messages(
         return Err((StatusCode::PAYLOAD_TOO_LARGE, "content_too_large"));
     }
 
+    // Validate max_tokens if provided
+    if let Some(max_tokens) = cr.max_tokens {
+        if max_tokens < 1 || max_tokens > 100_000 {
+            log::warn!("❌ Validation failed: max_tokens out of range ({})", max_tokens);
+            return Err((StatusCode::BAD_REQUEST, "invalid_max_tokens"));
+        }
+    }
+
+    // Validate system prompt length if provided
+    if let Some(ref system) = cr.system {
+        let system_size = match system {
+            serde_json::Value::String(s) => s.len(),
+            other => serde_json::to_string(other).unwrap_or_default().len(),
+        };
+        if system_size > 100 * 1024 {  // 100KB limit
+            log::warn!("❌ Validation failed: system prompt too large ({} bytes)", system_size);
+            return Err((StatusCode::BAD_REQUEST, "system_prompt_too_large"));
+        }
+    }
+
     // Debug: Log incoming headers (names only)
     log::debug!("📥 Incoming headers:");
     for (name, _) in headers.iter() {
@@ -92,10 +112,35 @@ pub async fn messages(
     let thinking_config = if cr.thinking.is_some() {
         cr.thinking
     } else {
-        // Check if this is a reasoning model
-        let is_reasoning_model = backend_model.to_lowercase().contains("reasoning")
-            || backend_model.to_lowercase().contains("r1")
-            || backend_model.to_lowercase().contains("deep");
+        // Check if this is a reasoning model by querying model cache
+        let is_reasoning_model = {
+            let cache = app.models_cache.read().await;
+            if let Some(models) = cache.as_ref() {
+                // Look for model in cache
+                models.iter()
+                    .find(|m| m.id.eq_ignore_ascii_case(&backend_model))
+                    .map(|model_info| {
+                        // Check if model supports thinking features
+                        model_info.supported_features.iter().any(|f| {
+                            f.eq_ignore_ascii_case("thinking") || 
+                            f.eq_ignore_ascii_case("extended_thinking")
+                        })
+                    })
+                    .unwrap_or_else(|| {
+                        // Fallback to string matching if model not found in cache
+                        let lower = backend_model.to_lowercase();
+                        lower.contains("reasoning") || 
+                        lower.contains("r1") || 
+                        lower.contains("deepseek")
+                    })
+            } else {
+                // Cache not available, use string matching fallback
+                let lower = backend_model.to_lowercase();
+                lower.contains("reasoning") || 
+                lower.contains("r1") || 
+                lower.contains("deepseek")
+            }
+        };
         
         if is_reasoning_model {
             log::info!("🧠 Auto-enabling thinking for reasoning model: {}", backend_model);
