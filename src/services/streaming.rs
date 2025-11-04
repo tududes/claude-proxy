@@ -1,5 +1,8 @@
 use std::collections::HashMap;
 
+/// Maximum buffer size before clearing (1MB)
+const MAX_BUFFER_SIZE: usize = 1_048_576;
+
 /// Simple SSE event parser that accumulates lines until a blank line, then yields the combined `data:` payload.
 /// This follows the SSE spec: multiple `data:` lines per event are joined by `\n`.
 pub struct SseEventParser {
@@ -19,6 +22,20 @@ impl SseEventParser {
     /// Feed bytes and extract zero or more complete SSE event payloads (already joined).
     pub fn push_and_drain_events(&mut self, chunk: &[u8]) -> Vec<String> {
         let s = String::from_utf8_lossy(chunk);
+        
+        // Check buffer size limit to prevent unbounded growth
+        if self.buf.len() + s.len() > MAX_BUFFER_SIZE {
+            log::warn!(
+                "⚠️  SSE buffer exceeded {}MB limit (current: {} bytes, incoming: {} bytes). Clearing buffer to prevent memory exhaustion.",
+                MAX_BUFFER_SIZE / 1_048_576,
+                self.buf.len(),
+                s.len()
+            );
+            // Clear buffer and start fresh with new chunk
+            self.buf.clear();
+            self.cur_data_lines.clear();
+        }
+        
         self.buf.push_str(&s);
         let mut out = Vec::new();
 
