@@ -59,18 +59,28 @@ async fn main() {
         circuit_breaker: circuit_breaker.clone(),
     };
 
-    // Background model cache refresh (every 60s)
-    {
+    // Background model cache refresh (every 60s) with graceful shutdown
+    let (shutdown_tx, mut shutdown_rx) = tokio::sync::mpsc::channel::<()>(1);
+    let cache_task = {
         let app_clone = app.clone();
         tokio::spawn(async move {
             loop {
                 if let Err(e) = refresh_models_cache(&app_clone).await {
                     log::warn!("Failed to refresh models cache: {}", e);
                 }
-                tokio::time::sleep(Duration::from_secs(60)).await;
+                
+                tokio::select! {
+                    _ = tokio::time::sleep(Duration::from_secs(60)) => {
+                        // Continue loop
+                    }
+                    _ = shutdown_rx.recv() => {
+                        info!("🛑 Model cache refresh task shutting down gracefully");
+                        break;
+                    }
+                }
             }
-        });
-    }
+        })
+    };
 
     let router = Router::new()
         .route("/health", get(handlers::health_check))
@@ -88,5 +98,22 @@ async fn main() {
         .await
         .unwrap();
     info!("   Listening on: 0.0.0.0:{}", port);
-    axum::serve(listener, router).await.unwrap();
+    
+    // Graceful shutdown: use axum's built-in mechanism
+    let server = axum::serve(listener, router)
+        .with_graceful_shutdown(async {
+            tokio::signal::ctrl_c().await.ok();
+            info!("🛑 Received shutdown signal, draining connections...");
+        });
+    
+    // Run server (this will complete when graceful shutdown finishes)
+    if let Err(e) = server.await {
+        log::error!("Server error: {}", e);
+    }
+    
+    // After server is shut down, clean up background tasks
+    info!("🧹 Cleaning up background tasks...");
+    let _ = shutdown_tx.send(()).await;
+    let _ = tokio::time::timeout(Duration::from_secs(5), cache_task).await;
+    info!("✅ Shutdown complete");
 }
