@@ -1,5 +1,12 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
+
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct ThinkingConfig {
+    #[serde(rename = "type")]
+    pub type_: String, // "enabled"
+    pub budget_tokens: u32,
+}
 
 #[derive(Deserialize, Debug)]
 pub struct ClaudeImageSource {
@@ -17,6 +24,8 @@ pub enum ClaudeContentBlock {
     Text { text: String },
     #[serde(rename = "image")]
     Image { source: ClaudeImageSource },
+    #[serde(rename = "thinking")]
+    Thinking { thinking: String },
     #[serde(rename = "tool_use")]
     ToolUse { id: String, name: String, input: Value },
     #[serde(rename = "tool_result")]
@@ -59,6 +68,8 @@ pub struct ClaudeRequest {
     pub stop_sequences: Option<Vec<String>>,
     #[serde(default)]
     pub tools: Option<Vec<ClaudeTool>>,
+    #[serde(default)]
+    pub thinking: Option<ThinkingConfig>,
     #[serde(default)]
     pub _stream: Option<bool>,
 }

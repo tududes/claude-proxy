@@ -1,0 +1,13 @@
+{
+  "model": "deepseek-r1",
+  "system": "You are a helpful assistant with reasoning capabilities.",
+  "messages": [
+    {
+      "role": "user",
+      "content": "What is the sum of all prime numbers less than 10? Show your reasoning."
+    }
+  ],
+  "max_tokens": 2048,
+  "stream": true
+}
+

@@ -1,0 +1,30 @@
+{
+  "model": "deepseek-r1",
+  "system": "You are a helpful assistant.",
+  "messages": [
+    {
+      "role": "user",
+      "content": "What is 2+2?"
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "thinking",
+          "thinking": "The user is asking for a simple arithmetic calculation. I need to add 2 and 2."
+        },
+        {
+          "type": "text",
+          "text": "2 + 2 = 4"
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": "Now multiply that result by 3."
+    }
+  ],
+  "max_tokens": 1024,
+  "stream": true
+}
+

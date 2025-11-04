@@ -87,6 +87,27 @@ pub async fn messages(
     // Normalize model name (case-correction only)
     let backend_model = normalize_model_name(&cr.model, &app.models_cache).await;
     let backend_model_for_metrics = backend_model.clone();
+    
+    // Auto-enable thinking for reasoning models if not explicitly provided
+    let thinking_config = if cr.thinking.is_some() {
+        cr.thinking
+    } else {
+        // Check if this is a reasoning model
+        let is_reasoning_model = backend_model.to_lowercase().contains("reasoning")
+            || backend_model.to_lowercase().contains("r1")
+            || backend_model.to_lowercase().contains("deep");
+        
+        if is_reasoning_model {
+            log::info!("🧠 Auto-enabling thinking for reasoning model: {}", backend_model);
+            Some(crate::models::ThinkingConfig {
+                type_: "enabled".to_string(),
+                budget_tokens: 10000,
+            })
+        } else {
+            None
+        }
+    };
+    
     let mut msgs = Vec::with_capacity(cr.messages.len() + 1);
     if let Some(sys) = cr.system {
         let system_content = convert_system_content(&sys);
@@ -166,11 +187,16 @@ pub async fn messages(
             }
         } else if m.role == "assistant" {
             // Assistant messages may include tool_use blocks → OpenAI tool_calls
+            let mut thinking_parts = Vec::new();
             let mut text_parts = Vec::new();
             let mut tool_calls = Vec::new();
 
             for block in &blocks {
                 match block {
+                    ClaudeContentBlock::Thinking { thinking } => {
+                        thinking_parts.push(thinking.as_str());
+                        log::info!("🧠 INPUT: Extracted thinking block ({} chars) from assistant message", thinking.len());
+                    }
                     ClaudeContentBlock::Text { text } => text_parts.push(text.as_str()),
                     ClaudeContentBlock::ToolUse { id, name, input } => {
                         tool_calls.push(json!({
@@ -186,10 +212,26 @@ pub async fn messages(
                 }
             }
 
-            let content = if text_parts.is_empty() {
+            // Interleave thinking: prepend thinking blocks as <think> tags
+            let content = if thinking_parts.is_empty() && text_parts.is_empty() {
                 Value::Null
             } else {
-                json!(text_parts.join("\n"))
+                let mut combined = String::new();
+                
+                // Add thinking content first, wrapped in <think> tags
+                if !thinking_parts.is_empty() {
+                    let thinking_text = thinking_parts.join("\n");
+                    let thinking_len = thinking_text.len();
+                    combined.push_str(&format!("<think>{}</think>\n", thinking_text));
+                    log::info!("🧠 INPUT: Converted {} thinking block(s) ({} chars) to interleaved <think> format", thinking_parts.len(), thinking_len);
+                }
+                
+                // Add regular text content
+                if !text_parts.is_empty() {
+                    combined.push_str(&text_parts.join("\n"));
+                }
+                
+                json!(combined)
             };
 
             msgs.push(OAIMessage {
@@ -288,6 +330,7 @@ pub async fn messages(
         top_p: cr.top_p,
         stop: cr.stop_sequences,
         tools,
+        thinking: thinking_config.map(|tc| serde_json::to_value(tc).unwrap_or(Value::Null)),
         stream: true,
     };
 
@@ -574,6 +617,8 @@ pub async fn messages(
 
         // Block indexing
         let mut next_block_index: i32 = 0;
+        let mut thinking_open = false;
+        let mut thinking_index: i32 = -1;
         let mut text_open = false;
         let mut text_index: i32 = -1;
 
@@ -809,16 +854,48 @@ pub async fn messages(
                     continue;
                 };
 
-                // Reasoning content (not displayed; we just acknowledge)
+                // Reasoning/thinking content - stream as proper thinking blocks
                 if let Some(r) = &d.reasoning_content {
                     if !r.is_empty() {
-                        log::debug!("🧠 Reasoning content ({} chars)", r.len());
+                        if !thinking_open {
+                            thinking_index = next_block_index;
+                            next_block_index += 1;
+                            let ev = json!({
+                                "type":"content_block_start",
+                                "index":thinking_index,
+                                "content_block":{"type":"thinking","thinking":""}
+                            });
+                            let _ = tx
+                                .send(Event::default().event("content_block_start").data(ev.to_string()))
+                                .await;
+                            thinking_open = true;
+                            log::info!("🧠 OUTPUT: Opened thinking block (index={})", thinking_index);
+                        }
+                        let ev = json!({
+                            "type":"content_block_delta",
+                            "index":thinking_index,
+                            "delta":{"type":"thinking_delta","thinking":r}
+                        });
+                        let _ = tx
+                            .send(Event::default().event("content_block_delta").data(ev.to_string()))
+                            .await;
+                        log::debug!("🧠 OUTPUT: Streamed thinking delta ({} chars)", r.len());
                     }
                 }
 
                 // Text deltas
                 if let Some(c) = &d.content {
                     if !c.is_empty() {
+                        // Close thinking block if still open (thinking comes before text)
+                        if thinking_open {
+                            let ev = json!({ "type":"content_block_stop", "index":thinking_index });
+                            let _ = tx
+                                .send(Event::default().event("content_block_stop").data(ev.to_string()))
+                                .await;
+                            thinking_open = false;
+                            log::info!("🧠 OUTPUT: Closed thinking block before text (index={})", thinking_index);
+                        }
+                        
                         if !text_open {
                             text_index = next_block_index;
                             next_block_index += 1;
@@ -948,6 +1025,13 @@ pub async fn messages(
         }
 
         // Close any open blocks and finish message
+        if thinking_open {
+            let ev = json!({ "type":"content_block_stop", "index":thinking_index });
+            let _ = tx
+                .send(Event::default().event("content_block_stop").data(ev.to_string()))
+                .await;
+            log::info!("🧠 OUTPUT: Closed thinking block at end (index={})", thinking_index);
+        }
         if text_open {
             let ev = json!({ "type":"content_block_stop", "index":text_index });
             let _ = tx

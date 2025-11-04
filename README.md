@@ -8,6 +8,7 @@ Routes Claude Code / Claude API requests to any OpenAI-compatible backend (SGLan
 
 - Full Claude API compatibility (text, images, tool_use, tool_result)
 - SSE streaming with proper event formatting
+- **Thinking/reasoning content support** - Auto-enables for reasoning models, streams thinking blocks
 - Client key forwarding (forwards client API keys directly to backend)
 - Model discovery with 60s cache refresh
 - Case-insensitive model matching with helpful 404 responses
@@ -86,7 +87,44 @@ curl -N http://localhost:8080/v1/messages \
 - **Tool use/results** - Full function calling support
 - **System prompts** - Converted to system message
 - **Multi-turn conversations** - Context preservation
+- **Thinking/reasoning content** - Automatic detection and streaming for reasoning models
 - **Model discovery** - Auto-refresh every 60s, case-insensitive matching
+
+### Thinking/Reasoning Content
+
+The proxy automatically handles thinking content for reasoning models:
+
+**Auto-enablement:**
+- Models containing "reasoning", "r1", or "deep" in the name automatically enable thinking with a 10,000 token budget
+- Override by explicitly providing `thinking` parameter in request
+
+**Input transformation:**
+- Assistant messages with thinking blocks → interleaved format: `<think>reasoning</think>\nresponse`
+- Preserves historical thinking content for multi-turn conversations
+
+**Output streaming:**
+- Backend `reasoning_content` → proper Claude thinking blocks
+- Thinking blocks streamed before text blocks
+- Event sequence: `content_block_start` (thinking) → `content_block_delta` (thinking_delta) → `content_block_stop` → text blocks
+
+**Example request:**
+```bash
+curl -N http://localhost:8080/v1/messages \
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer cpk_your_key' \
+  -d '{
+    "model": "deepseek-r1",
+    "messages": [{"role": "user", "content": "What is 2+2?"}],
+    "max_tokens": 1024,
+    "stream": true
+  }'
+```
+
+**Test:**
+```bash
+cd tests
+./test_thinking.sh
+```
 
 ## Usage with Claude Code
 

@@ -40,6 +40,8 @@ pub struct OAIChatReq {
     pub stop: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<OAITool>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thinking: Option<Value>,
     pub stream: bool,
 }
 
