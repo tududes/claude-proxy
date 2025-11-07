@@ -1094,6 +1094,21 @@ pub async fn messages(
 
         log::debug!("🏁 Streaming task completed");
 
+        // Drain any remaining bytes from backend stream to avoid cancelling the request
+        // This ensures the backend doesn't see a connection reset/cancellation
+        log::debug!("🔄 Draining remaining backend stream...");
+        let mut drained_bytes = 0;
+        while let Some(item) = bytes_stream.next().await {
+            if let Ok(chunk) = item {
+                drained_bytes += chunk.len();
+            }
+        }
+        if drained_bytes > 0 {
+            log::debug!("🔄 Drained {} additional bytes from backend stream", drained_bytes);
+        } else {
+            log::debug!("✅ Backend stream was already fully consumed");
+        }
+
         // Record circuit breaker success if no fatal error
         if !fatal_error {
             let cb_clone = app.circuit_breaker.clone();
