@@ -142,3 +142,309 @@ pub fn translate_finish_reason(oai_reason: Option<&str>) -> &'static str {
         None => "end_turn",
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    // ============================================================================
+    // extract_text_from_content tests
+    // ============================================================================
+
+    #[test]
+    fn test_extract_text_simple_string() {
+        let content = json!("Hello, world!");
+        let (text, images) = extract_text_from_content(&content);
+        assert_eq!(text, "Hello, world!");
+        assert_eq!(images, 0);
+    }
+
+    #[test]
+    fn test_extract_text_empty_string() {
+        let content = json!("");
+        let (text, images) = extract_text_from_content(&content);
+        assert_eq!(text, "");
+        assert_eq!(images, 0);
+    }
+
+    #[test]
+    fn test_extract_text_single_text_block() {
+        let content = json!([
+            {"type": "text", "text": "This is a test"}
+        ]);
+        let (text, images) = extract_text_from_content(&content);
+        assert_eq!(text, "This is a test");
+        assert_eq!(images, 0);
+    }
+
+    #[test]
+    fn test_extract_text_multiple_text_blocks() {
+        let content = json!([
+            {"type": "text", "text": "First block"},
+            {"type": "text", "text": "Second block"}
+        ]);
+        let (text, images) = extract_text_from_content(&content);
+        assert_eq!(text, "First block\nSecond block");
+        assert_eq!(images, 0);
+    }
+
+    #[test]
+    fn test_extract_text_with_image() {
+        let content = json!([
+            {"type": "text", "text": "Description"},
+            {"type": "image", "source": {"type": "base64", "data": "..."}}
+        ]);
+        let (text, images) = extract_text_from_content(&content);
+        assert_eq!(text, "Description");
+        assert_eq!(images, 1);
+    }
+
+    #[test]
+    fn test_extract_text_multiple_images() {
+        let content = json!([
+            {"type": "image", "source": {}},
+            {"type": "text", "text": "Between images"},
+            {"type": "image", "source": {}}
+        ]);
+        let (text, images) = extract_text_from_content(&content);
+        assert_eq!(text, "Between images");
+        assert_eq!(images, 2);
+    }
+
+    #[test]
+    fn test_extract_text_tool_use() {
+        let content = json!([
+            {"type": "tool_use", "name": "calculator", "input": {"a": 1, "b": 2}}
+        ]);
+        let (text, images) = extract_text_from_content(&content);
+        assert!(text.contains("calculator"));
+        assert!(text.contains(r#""a":1"#) || text.contains(r#""a": 1"#));
+        assert_eq!(images, 0);
+    }
+
+    #[test]
+    fn test_extract_text_tool_result_string() {
+        let content = json!([
+            {"type": "tool_result", "content": "Result text"}
+        ]);
+        let (text, images) = extract_text_from_content(&content);
+        assert_eq!(text, "Result text");
+        assert_eq!(images, 0);
+    }
+
+    #[test]
+    fn test_extract_text_tool_result_array() {
+        let content = json!([
+            {
+                "type": "tool_result",
+                "content": [
+                    {"type": "text", "text": "First"},
+                    {"type": "text", "text": "Second"}
+                ]
+            }
+        ]);
+        let (text, images) = extract_text_from_content(&content);
+        assert_eq!(text, "First\nSecond");
+        assert_eq!(images, 0);
+    }
+
+    #[test]
+    fn test_extract_text_unknown_block_type() {
+        let content = json!([
+            {"type": "unknown", "data": "ignored"},
+            {"type": "text", "text": "Visible"}
+        ]);
+        let (text, images) = extract_text_from_content(&content);
+        assert_eq!(text, "Visible");
+        assert_eq!(images, 0);
+    }
+
+    #[test]
+    fn test_extract_text_null() {
+        let content = json!(null);
+        let (text, images) = extract_text_from_content(&content);
+        assert_eq!(text, "");
+        assert_eq!(images, 0);
+    }
+
+    #[test]
+    fn test_extract_text_empty_array() {
+        let content = json!([]);
+        let (text, images) = extract_text_from_content(&content);
+        assert_eq!(text, "");
+        assert_eq!(images, 0);
+    }
+
+    // ============================================================================
+    // convert_system_content tests
+    // ============================================================================
+
+    #[test]
+    fn test_convert_system_simple_string() {
+        let system = json!("You are a helpful assistant");
+        let result = convert_system_content(&system);
+        assert_eq!(result, json!("You are a helpful assistant"));
+    }
+
+    #[test]
+    fn test_convert_system_empty_string() {
+        let system = json!("");
+        let result = convert_system_content(&system);
+        assert_eq!(result, json!(""));
+    }
+
+    #[test]
+    fn test_convert_system_single_block() {
+        let system = json!([
+            {"type": "text", "text": "System instruction"}
+        ]);
+        let result = convert_system_content(&system);
+        assert_eq!(result, json!("System instruction"));
+    }
+
+    #[test]
+    fn test_convert_system_multiple_blocks() {
+        let system = json!([
+            {"type": "text", "text": "First instruction"},
+            {"type": "text", "text": "Second instruction"}
+        ]);
+        let result = convert_system_content(&system);
+        assert_eq!(result, json!("First instruction\nSecond instruction"));
+    }
+
+    #[test]
+    fn test_convert_system_mixed_blocks() {
+        let system = json!([
+            {"type": "text", "text": "Visible"},
+            {"type": "image", "data": "ignored"},
+            {"type": "text", "text": "Also visible"}
+        ]);
+        let result = convert_system_content(&system);
+        assert_eq!(result, json!("Visible\nAlso visible"));
+    }
+
+    #[test]
+    fn test_convert_system_empty_array() {
+        let system = json!([]);
+        let result = convert_system_content(&system);
+        assert_eq!(result, json!(""));
+    }
+
+    #[test]
+    fn test_convert_system_null() {
+        let system = json!(null);
+        let result = convert_system_content(&system);
+        assert_eq!(result, json!(null));
+    }
+
+    // ============================================================================
+    // serialize_tool_result_content tests
+    // ============================================================================
+
+    #[test]
+    fn test_serialize_tool_result_simple_string() {
+        let content = json!("Success");
+        let result = serialize_tool_result_content(&content);
+        assert_eq!(result, "Success");
+    }
+
+    #[test]
+    fn test_serialize_tool_result_empty_string() {
+        let content = json!("");
+        let result = serialize_tool_result_content(&content);
+        assert_eq!(result, "");
+    }
+
+    #[test]
+    fn test_serialize_tool_result_array_of_text() {
+        let content = json!([
+            {"type": "text", "text": "Line 1"},
+            {"type": "text", "text": "Line 2"}
+        ]);
+        let result = serialize_tool_result_content(&content);
+        assert_eq!(result, "Line 1\nLine 2");
+    }
+
+    #[test]
+    fn test_serialize_tool_result_array_of_strings() {
+        let content = json!(["First", "Second", "Third"]);
+        let result = serialize_tool_result_content(&content);
+        assert_eq!(result, "First\nSecond\nThird");
+    }
+
+    #[test]
+    fn test_serialize_tool_result_mixed_array() {
+        let content = json!([
+            "Plain string",
+            {"type": "text", "text": "Text block"}
+        ]);
+        let result = serialize_tool_result_content(&content);
+        assert!(result.contains("Plain string"));
+        assert!(result.contains("Text block"));
+    }
+
+    #[test]
+    fn test_serialize_tool_result_complex_object() {
+        let content = json!({"result": "success", "data": [1, 2, 3]});
+        let result = serialize_tool_result_content(&content);
+        assert!(result.contains("result"));
+        assert!(result.contains("success"));
+    }
+
+    #[test]
+    fn test_serialize_tool_result_empty_array() {
+        let content = json!([]);
+        let result = serialize_tool_result_content(&content);
+        assert_eq!(result, "");
+    }
+
+    // ============================================================================
+    // translate_finish_reason tests
+    // ============================================================================
+
+    #[test]
+    fn test_translate_finish_reason_stop() {
+        assert_eq!(translate_finish_reason(Some("stop")), "end_turn");
+    }
+
+    #[test]
+    fn test_translate_finish_reason_length() {
+        assert_eq!(translate_finish_reason(Some("length")), "max_tokens");
+    }
+
+    #[test]
+    fn test_translate_finish_reason_tool_calls() {
+        assert_eq!(translate_finish_reason(Some("tool_calls")), "tool_use");
+    }
+
+    #[test]
+    fn test_translate_finish_reason_function_call() {
+        assert_eq!(translate_finish_reason(Some("function_call")), "tool_use");
+    }
+
+    #[test]
+    fn test_translate_finish_reason_content_filter() {
+        assert_eq!(translate_finish_reason(Some("content_filter")), "end_turn");
+    }
+
+    #[test]
+    fn test_translate_finish_reason_error() {
+        assert_eq!(translate_finish_reason(Some("error")), "error");
+    }
+
+    #[test]
+    fn test_translate_finish_reason_unknown() {
+        assert_eq!(translate_finish_reason(Some("unknown_reason")), "end_turn");
+    }
+
+    #[test]
+    fn test_translate_finish_reason_none() {
+        assert_eq!(translate_finish_reason(None), "end_turn");
+    }
+
+    #[test]
+    fn test_translate_finish_reason_empty_string() {
+        assert_eq!(translate_finish_reason(Some("")), "end_turn");
+    }
+}

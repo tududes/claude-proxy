@@ -91,3 +91,259 @@ pub struct ToolBuf {
 }
 
 pub type ToolsMap = HashMap<usize, ToolBuf>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ============================================================================
+    // SseEventParser tests
+    // ============================================================================
+
+    #[test]
+    fn test_sse_parser_single_event() {
+        let mut parser = SseEventParser::new();
+        let events = parser.push_and_drain_events(b"data: hello\n\n");
+        
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0], "hello");
+    }
+
+    #[test]
+    fn test_sse_parser_multiple_events() {
+        let mut parser = SseEventParser::new();
+        let events = parser.push_and_drain_events(b"data: first\n\ndata: second\n\n");
+        
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0], "first");
+        assert_eq!(events[1], "second");
+    }
+
+    #[test]
+    fn test_sse_parser_multiline_data() {
+        let mut parser = SseEventParser::new();
+        let events = parser.push_and_drain_events(b"data: line1\ndata: line2\n\n");
+        
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0], "line1\nline2");
+    }
+
+    #[test]
+    fn test_sse_parser_incomplete_event() {
+        let mut parser = SseEventParser::new();
+        
+        // First chunk - incomplete
+        let events1 = parser.push_and_drain_events(b"data: incomplete");
+        assert_eq!(events1.len(), 0);
+        
+        // Second chunk - completion
+        let events2 = parser.push_and_drain_events(b"\n\n");
+        assert_eq!(events2.len(), 1);
+        assert_eq!(events2[0], "incomplete");
+    }
+
+    #[test]
+    fn test_sse_parser_split_across_chunks() {
+        let mut parser = SseEventParser::new();
+        
+        let events1 = parser.push_and_drain_events(b"data: ");
+        assert_eq!(events1.len(), 0);
+        
+        let events2 = parser.push_and_drain_events(b"hello");
+        assert_eq!(events2.len(), 0);
+        
+        let events3 = parser.push_and_drain_events(b"\n\n");
+        assert_eq!(events3.len(), 1);
+        assert_eq!(events3[0], "hello");
+    }
+
+    #[test]
+    fn test_sse_parser_ignores_non_data_lines() {
+        let mut parser = SseEventParser::new();
+        let events = parser.push_and_drain_events(
+            b"event: message\nid: 123\ndata: payload\n\n"
+        );
+        
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0], "payload");
+    }
+
+    #[test]
+    fn test_sse_parser_empty_data() {
+        let mut parser = SseEventParser::new();
+        let events = parser.push_and_drain_events(b"data: \n\n");
+        
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0], "");
+    }
+
+    #[test]
+    fn test_sse_parser_multiple_blank_lines() {
+        let mut parser = SseEventParser::new();
+        let events = parser.push_and_drain_events(b"data: test\n\n\n\ndata: next\n\n");
+        
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0], "test");
+        assert_eq!(events[1], "next");
+    }
+
+    #[test]
+    fn test_sse_parser_carriage_return() {
+        let mut parser = SseEventParser::new();
+        let events = parser.push_and_drain_events(b"data: test\r\n\r\n");
+        
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0], "test");
+    }
+
+    #[test]
+    fn test_sse_parser_done_message() {
+        let mut parser = SseEventParser::new();
+        let events = parser.push_and_drain_events(b"data: [DONE]\n\n");
+        
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0], "[DONE]");
+    }
+
+    #[test]
+    fn test_sse_parser_json_payload() {
+        let mut parser = SseEventParser::new();
+        let events = parser.push_and_drain_events(
+            b"data: {\"key\":\"value\"}\n\n"
+        );
+        
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0], r#"{"key":"value"}"#);
+    }
+
+    #[test]
+    fn test_sse_parser_whitespace_in_data() {
+        let mut parser = SseEventParser::new();
+        let events = parser.push_and_drain_events(b"data:   spaced content  \n\n");
+        
+        assert_eq!(events.len(), 1);
+        // Leading space after colon is stripped
+        assert_eq!(events[0], "spaced content  ");
+    }
+
+    #[test]
+    fn test_sse_parser_empty_input() {
+        let mut parser = SseEventParser::new();
+        let events = parser.push_and_drain_events(b"");
+        
+        assert_eq!(events.len(), 0);
+    }
+
+    #[test]
+    fn test_sse_parser_flush_with_incomplete_line() {
+        let mut parser = SseEventParser::new();
+        // Push data with newline but no blank terminator
+        let _ = parser.push_and_drain_events(b"data: incomplete\n");
+        
+        // flush() consumes the parser and returns accumulated data lines
+        let flushed = parser.flush();
+        // The "data: incomplete\n" was parsed, data line was accumulated
+        assert_eq!(flushed, Some("incomplete".to_string()));
+    }
+
+    #[test]
+    fn test_sse_parser_flush_with_partial_line() {
+        let mut parser = SseEventParser::new();
+        // Push incomplete data (no newline at all)
+        let _ = parser.push_and_drain_events(b"data: partial");
+        
+        // flush() returns None because data is still in buf, not in cur_data_lines
+        let flushed = parser.flush();
+        assert_eq!(flushed, None);
+    }
+
+    #[test]
+    fn test_sse_parser_flush_empty() {
+        let parser = SseEventParser::new();
+        
+        let flushed = parser.flush();
+        assert_eq!(flushed, None);
+    }
+
+    #[test]
+    fn test_sse_parser_flush_after_complete_event() {
+        let mut parser = SseEventParser::new();
+        let _events = parser.push_and_drain_events(b"data: complete\n\n");
+        
+        let flushed = parser.flush();
+        assert_eq!(flushed, None);
+    }
+
+    #[test]
+    fn test_sse_parser_large_chunk() {
+        let mut parser = SseEventParser::new();
+        
+        // Create a large but valid event
+        let large_data = "x".repeat(1000);
+        let input = format!("data: {}\n\n", large_data);
+        
+        let events = parser.push_and_drain_events(input.as_bytes());
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].len(), 1000);
+    }
+
+    #[test]
+    fn test_sse_parser_buffer_limit_exceeded() {
+        let mut parser = SseEventParser::new();
+        
+        // Create a chunk that exceeds MAX_BUFFER_SIZE (1MB)
+        let huge_data = vec![b'x'; MAX_BUFFER_SIZE + 1000];
+        
+        // This should trigger the buffer clear warning
+        let events = parser.push_and_drain_events(&huge_data);
+        
+        // Buffer should be cleared and start fresh
+        // Since there's no newline, no events returned
+        assert_eq!(events.len(), 0);
+    }
+
+    #[test]
+    fn test_sse_parser_real_world_openai_chunk() {
+        let mut parser = SseEventParser::new();
+        let chunk = b"data: {\"id\":\"chatcmpl-123\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"delta\":{\"content\":\"Hello\"},\"index\":0}]}\n\n";
+        
+        let events = parser.push_and_drain_events(chunk);
+        assert_eq!(events.len(), 1);
+        assert!(events[0].contains("chatcmpl-123"));
+        assert!(events[0].contains("Hello"));
+    }
+
+    #[test]
+    fn test_sse_parser_real_world_anthropic_chunk() {
+        let mut parser = SseEventParser::new();
+        let chunk = b"data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Hello\"}}\n\n";
+        
+        let events = parser.push_and_drain_events(chunk);
+        assert_eq!(events.len(), 1);
+        assert!(events[0].contains("content_block_delta"));
+        assert!(events[0].contains("Hello"));
+    }
+
+    #[test]
+    fn test_sse_parser_utf8_content() {
+        let mut parser = SseEventParser::new();
+        let events = parser.push_and_drain_events("data: Hello 世界 🌍\n\n".as_bytes());
+        
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0], "Hello 世界 🌍");
+    }
+
+    #[test]
+    fn test_sse_parser_sequential_events_no_gap() {
+        let mut parser = SseEventParser::new();
+        
+        // Three events with no gap between terminating blank line and next event
+        let input = b"data: first\n\ndata: second\n\ndata: third\n\n";
+        let events = parser.push_and_drain_events(input);
+        
+        assert_eq!(events.len(), 3);
+        assert_eq!(events[0], "first");
+        assert_eq!(events[1], "second");
+        assert_eq!(events[2], "third");
+    }
+}
