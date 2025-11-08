@@ -42,7 +42,7 @@ pub async fn messages(
         return Err((StatusCode::BAD_REQUEST, "empty_messages"));
     }
 
-    if cr.messages.len() > 1000 {
+    if cr.messages.len() > 10_000 {
         log::warn!("❌ Validation failed: too many messages ({})", cr.messages.len());
         return Err((StatusCode::BAD_REQUEST, "too_many_messages"));
     }
@@ -81,6 +81,14 @@ pub async fn messages(
             log::warn!("❌ Validation failed: system prompt too large ({} bytes)", system_size);
             return Err((StatusCode::BAD_REQUEST, "system_prompt_too_large"));
         }
+    }
+
+    // Log warnings for unsupported parameters (accepted but ignored)
+    if cr.metadata.is_some() {
+        log::warn!("⚠️  'metadata' parameter not supported by backend (accepted but ignored)");
+    }
+    if cr.service_tier.is_some() {
+        log::warn!("⚠️  'service_tier' parameter not supported by backend (accepted but ignored)");
     }
 
     // Debug: Log incoming headers (names only)
@@ -362,8 +370,10 @@ pub async fn messages(
         max_tokens: cr.max_tokens,
         temperature: cr.temperature,
         top_p: cr.top_p,
+        top_k: cr.top_k,
         stop: cr.stop_sequences,
         tools,
+        tool_choice: cr.tool_choice,
         thinking: thinking_config.map(|tc| serde_json::to_value(tc).unwrap_or(Value::Null)),
         stream: true,
     };
