@@ -25,3 +25,8 @@ Thumbs.db
 /tmp
 *.tmp
 
+# API Specification Sources (cloned for reference, not tracked)
+/anthropic-spec/
+/openai-spec/
+/openai-spec-manual/
+

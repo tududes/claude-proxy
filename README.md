@@ -15,7 +15,7 @@ Routes Claude Code / Claude API requests to any OpenAI-compatible backend (SGLan
 - Token counting endpoint (tiktoken-based)
 - Optional circuit breaker (disabled by default, can be enabled via env)
 - Health check endpoint
-- Request validation (max 1000 messages, 5MB content)
+- Request validation (max 10,000 messages, 5MB content)
 
 ## Quick Start
 
@@ -84,10 +84,11 @@ curl -N http://localhost:8080/v1/messages \
 
 - **Text content** - String or content blocks
 - **Images** - Base64 encoded, converted to OpenAI data URI format
-- **Tool use/results** - Full function calling support
+- **Tool use/results** - Full function calling support with `tool_choice` parameter
 - **System prompts** - Converted to system message
-- **Multi-turn conversations** - Context preservation
+- **Multi-turn conversations** - Context preservation (up to 10K messages)
 - **Thinking/reasoning content** - Automatic detection and streaming for reasoning models
+- **Advanced sampling** - Supports `temperature`, `top_p`, `top_k`
 - **Model discovery** - Auto-refresh every 60s, case-insensitive matching
 
 ### Thinking/Reasoning Content
@@ -175,19 +176,48 @@ claude
 
 Set `CHUTES_TEST_API_KEY=cpk_your_key` in `.env` or export before running tests.
 
+### Unit Tests (81 tests ✅)
+
+```bash
+cargo test              # Run all unit tests
+cargo test auth         # Run auth module tests
+cargo test streaming    # Run SSE parser tests
+cargo test content_extraction  # Run content translation tests
+```
+
+**Coverage:** 90%+ for critical utilities (auth, streaming, content extraction)
+
 ## Building
 
 ```bash
 cargo build --release    # Binary: target/release/claude_openai_proxy (~4MB)
-cargo test              # Run unit tests
+cargo test              # Run unit tests (81 tests)
+cargo test -- --nocapture  # Show test output
 ```
 
 ## Documentation
 
 - [API Reference](docs/API_REFERENCE.md) - Complete API specification
+- [API Comparison](docs/API_COMPARISON.md) - Detailed Anthropic vs OpenAI spec comparison
+- [Spec Analysis Summary](docs/SPEC_ANALYSIS_SUMMARY.md) - Executive summary of API compatibility
+- [Spec Sources](docs/SPEC_SOURCES.md) - Information about cloned API specifications
+- [Test Coverage Summary](docs/TEST_COVERAGE_SUMMARY.md) - Unit test coverage report
 - [Docker Guide](docs/DOCKER.md) - Deployment with SSL/TLS
 - [Production Guide](docs/PRODUCTION_GUIDE.md) - Production features and monitoring
 - [Implementation Details](docs/IMPLEMENTATION_DETAILS.md) - Architecture and design
+
+### API Specification Analysis
+
+We've analyzed the official Anthropic Messages API and OpenAI Chat Completions API specs:
+
+- ✅ **~95% core compatibility** for standard use cases (text, images, tools, streaming)
+- ✅ **Tool choice** - Force specific tools or disable tool usage (v0.1.5)
+- ✅ **Advanced sampling** - `top_k` parameter support (v0.1.5)
+- ✅ **Long conversations** - 10K message limit (v0.1.5)
+- ⚠️  **Partial support** for advanced features (response_format, PDFs)
+- ❌ **Unsupported** features: server tools, prompt caching, citations, audio
+
+See [API_COMPARISON.md](docs/API_COMPARISON.md) and [CHANGELOG.md](CHANGELOG.md) for details.
 
 ## Troubleshooting
 
