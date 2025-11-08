@@ -37,9 +37,13 @@ pub struct OAIChatReq {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub top_p: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub top_k: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub stop: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<OAITool>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_choice: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thinking: Option<Value>,
     pub stream: bool,

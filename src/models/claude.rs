@@ -65,13 +65,22 @@ pub struct ClaudeRequest {
     #[serde(default)]
     pub top_p: Option<f32>,
     #[serde(default)]
+    pub top_k: Option<u32>,
+    #[serde(default)]
     pub stop_sequences: Option<Vec<String>>,
     #[serde(default)]
     pub tools: Option<Vec<ClaudeTool>>,
     #[serde(default)]
+    pub tool_choice: Option<Value>,
+    #[serde(default)]
     pub thinking: Option<ThinkingConfig>,
     #[serde(default)]
     pub _stream: Option<bool>,
+    // Fields for validation warnings (accepted but not used)
+    #[serde(default)]
+    pub metadata: Option<Value>,
+    #[serde(default)]
+    pub service_tier: Option<String>,
 }
 
 #[derive(Deserialize)]
