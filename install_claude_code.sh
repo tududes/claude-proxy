@@ -138,45 +138,125 @@ configure_claude_json(){
 }
 
 # ========================
+#     Model Selection
+# ========================
+
+select_model() {
+    local api_key="$1"
+    
+    log_info "Fetching available models from $API_BASE_URL..."
+    
+    # Fetch models from API
+    local models_response
+    models_response=$(curl -s -H "Authorization: Bearer $api_key" "$API_BASE_URL/v1/models" 2>/dev/null)
+    
+    if [ $? -ne 0 ] || [ -z "$models_response" ]; then
+        log_error "Failed to fetch models from API"
+        echo "   Using default model: deepseek-ai/DeepSeek-R1"
+        echo "deepseek-ai/DeepSeek-R1"
+        return
+    fi
+    
+    # Parse model IDs using node
+    local models
+    models=$(echo "$models_response" | node --eval '
+        const data = JSON.parse(require("fs").readFileSync(0, "utf-8"));
+        if (data.data && Array.isArray(data.data)) {
+            data.data.forEach((model, idx) => {
+                console.log((idx + 1) + "|" + model.id);
+            });
+        }
+    ' 2>/dev/null)
+    
+    if [ -z "$models" ]; then
+        log_error "No models found in API response"
+        echo "   Using default model: deepseek-ai/DeepSeek-R1"
+        echo "deepseek-ai/DeepSeek-R1"
+        return
+    fi
+    
+    # Display models
+    echo ""
+    log_info "Available models:"
+    echo "$models" | while IFS='|' read -r num model_id; do
+        printf "   %2s) %s\n" "$num" "$model_id"
+    done
+    echo ""
+    
+    # Get user selection
+    local total_models
+    total_models=$(echo "$models" | wc -l)
+    
+    while true; do
+        read -p "🎯 Select a model (1-$total_models) [default: 1]: " selection
+        selection=${selection:-1}
+        
+        if [[ "$selection" =~ ^[0-9]+$ ]] && [ "$selection" -ge 1 ] && [ "$selection" -le "$total_models" ]; then
+            local selected_model
+            selected_model=$(echo "$models" | sed -n "${selection}p" | cut -d'|' -f2)
+            echo "$selected_model"
+            return
+        else
+            log_error "Invalid selection. Please enter a number between 1 and $total_models"
+        fi
+    done
+}
+
+# ========================
 #     API Key Configuration
 # ========================
 
 configure_claude() {
     log_info "Configuring Claude Code..."
     echo "   You can get your API key from: $API_KEY_URL"
-    read -s -p "ðŸ”‘ Please enter your chutes.ai API key: " api_key
+    read -s -p "🔑 Please enter your chutes.ai API key: " api_key
     echo
 
     if [ -z "$api_key" ]; then
         log_error "API key cannot be empty. Please run the script again."
         exit 1
     fi
+    
+    # Select model interactively
+    local selected_model
+    selected_model=$(select_model "$api_key")
+    log_success "Selected model: $selected_model"
 
     ensure_dir_exists "$CONFIG_DIR"
 
     # Write settings.json
     node --eval '
-        const os = require("os");
-        const fs = require("fs");
-        const path = require("path");
+      const os = require("os");
+      const fs = require("fs");
+      const path = require("path");
 
-        const homeDir = os.homedir();
-        const filePath = path.join(homeDir, ".claude", "settings.json");
-        const apiKey = "'"$api_key"'";
+      const homeDir = os.homedir();
+      const filePath = path.join(homeDir, ".claude", "settings.json");
+      const apiKey = "'"$api_key"'";
+      const selectedModel = "'"$selected_model"'";
+      const apiBaseUrl = "'"$API_BASE_URL"'";
+      const apiTimeout = "'"$API_TIMEOUT_MS"'";
 
-        const content = fs.existsSync(filePath)
-            ? JSON.parse(fs.readFileSync(filePath, "utf-8"))
-            : {};
+      const content = fs.existsSync(filePath)
+          ? JSON.parse(fs.readFileSync(filePath, "utf-8"))
+          : {};
 
-        fs.writeFileSync(filePath, JSON.stringify({
-            ...content,
-            env: {
-                ANTHROPIC_AUTH_TOKEN: apiKey,
-                ANTHROPIC_BASE_URL: "'"$API_BASE_URL"'",
-                API_TIMEOUT_MS: "'"$API_TIMEOUT_MS"'",
-                CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: 1
-            }
-        }, null, 2), "utf-8");
+      fs.writeFileSync(filePath, JSON.stringify({
+          ...content,
+          model: selectedModel,
+          alwaysThinkingEnabled: true,
+          env: {
+              ANTHROPIC_AUTH_TOKEN: apiKey,
+              ANTHROPIC_BASE_URL: apiBaseUrl,
+              API_TIMEOUT_MS: apiTimeout,
+              CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
+              ANTHROPIC_DEFAULT_HAIKU_MODEL: selectedModel,
+              ANTHROPIC_DEFAULT_SONNET_MODEL: selectedModel,
+              ANTHROPIC_DEFAULT_OPUS_MODEL: selectedModel,
+              CLAUDE_CODE_SUBAGENT_MODEL: selectedModel,
+              ANTHROPIC_SMALL_FAST_MODEL: selectedModel
+          }
+      }, null, 2), "utf-8");
     ' || {
         log_error "Failed to write settings.json"
         exit 1
