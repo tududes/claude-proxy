@@ -725,11 +725,10 @@ pub async fn messages(
             "message": message_obj
         });
         
-        if let Err(e) = tx
-            .send(Event::default().event("message_start").data(start.to_string()))
-            .await 
-        {
-            log::warn!("⚠️  Failed to send message_start event: {:?}", e);
+        // If we can't send message_start, client is gone - no point continuing
+        if tx.send(Event::default().event("message_start").data(start.to_string())).await.is_err() {
+            log::debug!("🔌 Client disconnected before message_start - aborting stream");
+            return;
         }
 
         let mut bytes_stream = res.bytes_stream();
@@ -798,9 +797,10 @@ pub async fn messages(
                                 // Close any open text block before emitting the error
                                 if text_open {
                                     let stop = json!({"type":"content_block_stop","index":text_index});
-                                    let _ = tx
-                                        .send(Event::default().event("content_block_stop").data(stop.to_string()))
-                                        .await;
+                                    if tx.send(Event::default().event("content_block_stop").data(stop.to_string())).await.is_err() {
+                                        log::debug!("🔌 Client disconnected during error block close");
+                                        break;
+                                    }
                                     text_open = false;
                                 }
 
@@ -813,9 +813,10 @@ pub async fn messages(
                                     "index":error_index,
                                     "content_block":{"type":"text","text":""}
                                 });
-                                let _ = tx
-                                    .send(Event::default().event("content_block_start").data(start.to_string()))
-                                    .await;
+                                if tx.send(Event::default().event("content_block_start").data(start.to_string())).await.is_err() {
+                                    log::debug!("🔌 Client disconnected during error start");
+                                    break;
+                                }
 
                                 // Format structured error message
                                 let formatted_error = format_backend_error(&error_details, data);
@@ -825,9 +826,10 @@ pub async fn messages(
                                     "index":error_index,
                                     "delta":{"type":"text_delta","text":formatted_error}
                                 });
-                                let _ = tx
-                                    .send(Event::default().event("content_block_delta").data(delta.to_string()))
-                                    .await;
+                                if tx.send(Event::default().event("content_block_delta").data(delta.to_string())).await.is_err() {
+                                    log::debug!("🔌 Client disconnected during error delta");
+                                    break;
+                                }
 
                                 let stop = json!({
                                     "type":"content_block_stop",
@@ -884,9 +886,10 @@ pub async fn messages(
                     // Close any open text block before emitting the error
                     if text_open {
                         let stop = json!({"type":"content_block_stop","index":text_index});
-                        let _ = tx
-                            .send(Event::default().event("content_block_stop").data(stop.to_string()))
-                            .await;
+                        if tx.send(Event::default().event("content_block_stop").data(stop.to_string())).await.is_err() {
+                            log::debug!("🔌 Client disconnected during chunk error block close");
+                            break;
+                        }
                         text_open = false;
                     }
 
@@ -899,9 +902,10 @@ pub async fn messages(
                         "index":error_index,
                         "content_block":{"type":"text","text":""}
                     });
-                    let _ = tx
-                        .send(Event::default().event("content_block_start").data(start.to_string()))
-                        .await;
+                    if tx.send(Event::default().event("content_block_start").data(start.to_string())).await.is_err() {
+                        log::debug!("🔌 Client disconnected during chunk error start");
+                        break;
+                    }
 
                                 // Format structured error message
                                 let formatted_error = format_backend_error(&error_details, data);
@@ -911,9 +915,10 @@ pub async fn messages(
                                     "index":error_index,
                                     "delta":{"type":"text_delta","text":formatted_error}
                                 });
-                    let _ = tx
-                        .send(Event::default().event("content_block_delta").data(delta.to_string()))
-                        .await;
+                    if tx.send(Event::default().event("content_block_delta").data(delta.to_string())).await.is_err() {
+                        log::debug!("🔌 Client disconnected during chunk error delta");
+                        break;
+                    }
 
                     let stop = json!({
                         "type":"content_block_stop",
@@ -1197,13 +1202,16 @@ pub async fn messages(
             "delta":{"stop_reason":final_stop_reason,"stop_sequence":null},
             "usage":{"output_tokens":output_token_count}
         });
-        let _ = tx
-            .send(Event::default().event("message_delta").data(md.to_string()))
-            .await;
+        // Critical: if these final events fail, stream is incomplete - but log it
+        if tx.send(Event::default().event("message_delta").data(md.to_string())).await.is_err() {
+            log::debug!("🔌 Client disconnected before message_delta");
+            return;
+        }
 
-        let _ = tx
-            .send(Event::default().event("message_stop").data(json!({"type":"message_stop"}).to_string()))
-            .await;
+        if tx.send(Event::default().event("message_stop").data(json!({"type":"message_stop"}).to_string())).await.is_err() {
+            log::debug!("🔌 Client disconnected before message_stop");
+            return;
+        }
 
         log::debug!("🏁 Streaming task completed");
 
