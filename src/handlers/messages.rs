@@ -11,6 +11,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 use tokio_stream::wrappers::ReceiverStream;
+use crate::constants::*;
 use crate::models::{App, ClaudeRequest, ClaudeContentBlock, OAIMessage, OAIChatReq, OAIStreamChunk};
 use crate::services::{SseEventParser, ToolBuf, ToolsMap, extract_client_key, mask_token,
                      get_available_models, format_backend_error, build_model_list_content};
@@ -65,13 +66,13 @@ fn count_input_tokens(
     match tiktoken_rs::cl100k_base() {
         Ok(encoder) => {
             let text_tokens = encoder.encode_with_special_tokens(&combined_text).len();
-            let image_tokens = image_count * 85;
+            let image_tokens = image_count * TOKENS_PER_IMAGE;
             (text_tokens + image_tokens) as u32
         }
         Err(_) => {
             // Fallback to rough estimation
-            let text_estimate = std::cmp::max(1, combined_text.len() / 4);
-            let image_tokens = image_count * 85;
+            let text_estimate = std::cmp::max(1, combined_text.len() / CHARS_PER_TOKEN);
+            let image_tokens = image_count * TOKENS_PER_IMAGE;
             (text_estimate + image_tokens) as u32
         }
     }
@@ -106,7 +107,7 @@ pub async fn messages(
         return Err((StatusCode::BAD_REQUEST, "empty_messages"));
     }
 
-    if cr.messages.len() > 10_000 {
+    if cr.messages.len() > MAX_MESSAGES_PER_REQUEST {
         log::warn!("❌ Validation failed: too many messages ({})", cr.messages.len());
         return Err((StatusCode::BAD_REQUEST, "too_many_messages"));
     }
@@ -122,14 +123,14 @@ pub async fn messages(
         })
         .sum();
 
-    if total_content_size > 5 * 1024 * 1024 {  // 5MB content limit
+    if total_content_size > MAX_TOTAL_CONTENT_SIZE {
         log::warn!("❌ Validation failed: content too large ({} bytes)", total_content_size);
         return Err((StatusCode::PAYLOAD_TOO_LARGE, "content_too_large"));
     }
 
     // Validate max_tokens if provided
     if let Some(max_tokens) = cr.max_tokens {
-        if max_tokens < 1 || max_tokens > 100_000 {
+        if max_tokens < MIN_TOKENS_LIMIT || max_tokens > MAX_TOKENS_LIMIT {
             log::warn!("❌ Validation failed: max_tokens out of range ({})", max_tokens);
             return Err((StatusCode::BAD_REQUEST, "invalid_max_tokens"));
         }
@@ -141,7 +142,7 @@ pub async fn messages(
             serde_json::Value::String(s) => s.len(),
             other => serde_json::to_string(other).unwrap_or_default().len(),
         };
-        if system_size > 100 * 1024 {  // 100KB limit
+        if system_size > MAX_SYSTEM_PROMPT_SIZE {
             log::warn!("❌ Validation failed: system prompt too large ({} bytes)", system_size);
             return Err((StatusCode::BAD_REQUEST, "system_prompt_too_large"));
         }
@@ -207,7 +208,7 @@ pub async fn messages(
             log::info!("🧠 Auto-enabling thinking for reasoning model: {}", backend_model);
             Some(crate::models::ThinkingConfig {
                 type_: "enabled".to_string(),
-                budget_tokens: 10000,
+                budget_tokens: DEFAULT_THINKING_BUDGET_TOKENS,
             })
         } else {
             None
@@ -551,7 +552,7 @@ pub async fn messages(
             if !models.is_empty() {
                 log::info!("💡 Model '{}' not found - sending model list to user", backend_model_for_error);
 
-                let (tx, rx) = tokio::sync::mpsc::channel::<Event>(64);
+                let (tx, rx) = tokio::sync::mpsc::channel::<Event>(SSE_CHANNEL_BUFFER_SIZE);
                 let requested_model = backend_model_for_error.clone();
                 let model_name_for_response = backend_model_for_error.clone();
                 let models_for_task = models.clone();
@@ -1026,7 +1027,7 @@ pub async fn messages(
                         log::debug!("🧠 OUTPUT: Streamed thinking delta ({} chars)", r.len());
 
                         // Count reasoning tokens (approximate)
-                        let reasoning_tokens = std::cmp::max(1, r.len() / 4) as u32;
+                        let reasoning_tokens = std::cmp::max(1, r.len() / CHARS_PER_TOKEN) as u32;
                         output_token_count += reasoning_tokens;
                     }
                 }
@@ -1067,7 +1068,7 @@ pub async fn messages(
                             .await;
 
                         // Count text tokens (approximate)
-                        let text_tokens = std::cmp::max(1, c.len() / 4) as u32;
+                        let text_tokens = std::cmp::max(1, c.len() / CHARS_PER_TOKEN) as u32;
                         output_token_count += text_tokens;
                     }
                 }

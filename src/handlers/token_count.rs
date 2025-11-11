@@ -4,6 +4,7 @@ use axum::{
     response::Result,
 };
 use serde_json::{json, Value};
+use crate::constants::*;
 use crate::models::{App, ClaudeTokenCountRequest};
 
 /// Count tokens using tiktoken (cl100k_base encoding baseline)
@@ -67,13 +68,13 @@ pub async fn count_tokens(
         match tiktoken_rs::cl100k_base() {
             Ok(encoder) => {
                 let text_tokens = encoder.encode_with_special_tokens(&combined_text).len();
-                let image_tokens = image_count * 85;
+                let image_tokens = image_count * TOKENS_PER_IMAGE;
                 text_tokens + image_tokens
             }
             Err(e) => {
                 log::warn!("Failed to initialize tiktoken: {}, falling back to estimation", e);
-                let text_estimate = std::cmp::max(1, combined_text.len() / 4);
-                let image_tokens = image_count * 85;
+                let text_estimate = std::cmp::max(1, combined_text.len() / CHARS_PER_TOKEN);
+                let image_tokens = image_count * TOKENS_PER_IMAGE;
                 text_estimate + image_tokens
             }
         }

@@ -5,6 +5,7 @@ use std::{
 use tokio::sync::RwLock;
 use log::warn;
 use reqwest::Client;
+use crate::constants::*;
 
 #[derive(Clone, Debug)]
 pub struct ModelInfo {
@@ -53,7 +54,7 @@ impl CircuitBreakerState {
     pub fn record_failure(&mut self) {
         self.consecutive_failures += 1;
         self.last_failure_time = Some(SystemTime::now());
-        if self.consecutive_failures >= 5 {
+        if self.consecutive_failures >= CIRCUIT_BREAKER_FAILURE_THRESHOLD {
             self.is_open = true;
             warn!("🔴 Circuit breaker opened after {} consecutive failures", self.consecutive_failures);
         }
