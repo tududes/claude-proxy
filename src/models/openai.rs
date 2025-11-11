@@ -108,4 +108,17 @@ pub struct OAIStreamChunk {
     // Allow error fields for graceful handling
     #[serde(default)]
     pub error: Option<serde_json::Value>,
+    // Usage statistics from backend (optional)
+    #[serde(default)]
+    pub usage: Option<OAIUsage>,
+}
+
+#[derive(Deserialize, Default, Debug)]
+pub struct OAIUsage {
+    #[serde(default)]
+    pub prompt_tokens: Option<u32>,
+    #[serde(default)]
+    pub completion_tokens: Option<u32>,
+    #[serde(default)]
+    pub total_tokens: Option<u32>,
 }

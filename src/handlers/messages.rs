@@ -17,6 +17,66 @@ use crate::services::{SseEventParser, ToolBuf, ToolsMap, extract_client_key, mas
 use crate::utils::normalize_model_name;
 use crate::utils::content_extraction::{translate_finish_reason, build_oai_tools, convert_system_content, serialize_tool_result_content};
 
+/// Count tokens in a Claude request using tiktoken
+fn count_input_tokens(
+    messages: &[crate::models::ClaudeMessage],
+    system: &Option<serde_json::Value>,
+    tools: &Option<Vec<crate::models::ClaudeTool>>,
+) -> u32 {
+    let mut text_parts = Vec::new();
+    let mut image_count = 0;
+
+    // System prompt
+    if let Some(sys) = system {
+        let sys_text = match sys {
+            serde_json::Value::String(s) => s.clone(),
+            _ => serde_json::to_string(sys).unwrap_or_default(),
+        };
+        if !sys_text.is_empty() {
+            text_parts.push(sys_text);
+        }
+    }
+
+    // Messages
+    for msg in messages {
+        let (msg_text, msg_image_count) = crate::utils::content_extraction::extract_text_from_content(&msg.content);
+        if !msg_text.is_empty() {
+            text_parts.push(format!("{}: {}", msg.role, msg_text));
+        }
+        image_count += msg_image_count;
+    }
+
+    // Tools
+    if let Some(tools) = tools {
+        for tool in tools {
+            text_parts.push(tool.name.clone());
+            if let Some(desc) = &tool.description {
+                text_parts.push(desc.clone());
+            }
+            if let Ok(schema_str) = serde_json::to_string(&tool.input_schema) {
+                text_parts.push(schema_str);
+            }
+        }
+    }
+
+    let combined_text = text_parts.join("\n");
+
+    // Count tokens using tiktoken
+    match tiktoken_rs::cl100k_base() {
+        Ok(encoder) => {
+            let text_tokens = encoder.encode_with_special_tokens(&combined_text).len();
+            let image_tokens = image_count * 85;
+            (text_tokens + image_tokens) as u32
+        }
+        Err(_) => {
+            // Fallback to rough estimation
+            let text_estimate = std::cmp::max(1, combined_text.len() / 4);
+            let image_tokens = image_count * 85;
+            (text_estimate + image_tokens) as u32
+        }
+    }
+}
+
 pub async fn messages(
     State(app): State<App>,
     headers: HeaderMap,
@@ -26,6 +86,10 @@ pub async fn messages(
     (StatusCode, &'static str),
 > {
     let request_start = SystemTime::now();
+
+    // Count input tokens
+    let input_token_count = count_input_tokens(&cr.messages, &cr.system, &cr.tools);
+    log::debug!("📊 Input tokens: {}", input_token_count);
 
     // Circuit breaker check
     {
@@ -511,7 +575,7 @@ pub async fn messages(
                             "model": model_name_for_response,
                             "stop_reason": Value::Null,
                             "stop_sequence": Value::Null,
-                            "usage": { "input_tokens": 0, "output_tokens": 0 }
+                            "usage": { "input_tokens": input_token_count, "output_tokens": 0 }
                         }
                     });
                     let _ = tx.send(Event::default().event("message_start").data(start.to_string())).await;
@@ -588,7 +652,7 @@ pub async fn messages(
                     "model": model_name,
                     "stop_reason": Value::Null,
                     "stop_sequence": Value::Null,
-                    "usage": { "input_tokens": 0, "output_tokens": 0 }
+                    "usage": { "input_tokens": input_token_count, "output_tokens": 0 }
                 }
             });
             let _ = tx.send(Event::default().event("message_start").data(start.to_string())).await;
@@ -650,7 +714,7 @@ pub async fn messages(
                 "content": [], "model": model_for_header,
                 "stop_reason": serde_json::Value::Null,
                 "stop_sequence": serde_json::Value::Null,
-                "usage": {"input_tokens":0, "output_tokens":0}
+                "usage": {"input_tokens":input_token_count, "output_tokens":0}
             }
         });
         let _ = tx
@@ -672,6 +736,9 @@ pub async fn messages(
         let mut done = false;
         let mut final_stop_reason = "end_turn"; // Default, will be updated if backend provides finish_reason
         let mut fatal_error = false;
+
+        // Track output tokens
+        let mut output_token_count: u32 = 0;
 
         log::debug!("🌊 Begin processing SSE from backend");
         while let Some(item) = bytes_stream.next().await {
@@ -898,6 +965,23 @@ pub async fn messages(
                     continue;
                 };
 
+                // Check if backend provides usage statistics (more accurate than our approximation)
+                if let Some(usage) = &chunk.usage {
+                    if let Some(prompt_tokens) = usage.prompt_tokens {
+                        log::debug!("📊 Backend reported prompt tokens: {}", prompt_tokens);
+                    }
+                    if let Some(total_tokens) = usage.total_tokens {
+                        // total_tokens is most accurate - always prefer it
+                        output_token_count = total_tokens;
+                        log::debug!("📊 Backend reported total tokens: {}", total_tokens);
+                    } else if let Some(completion_tokens) = usage.completion_tokens {
+                        // Use completion_tokens as fallback if total_tokens not available
+                        // This is more accurate than our streaming approximation
+                        output_token_count = completion_tokens;
+                        log::debug!("📊 Backend reported completion tokens: {}", completion_tokens);
+                    }
+                }
+
                 // Reasoning/thinking content - stream as proper thinking blocks
                 if let Some(r) = &d.reasoning_content {
                     if !r.is_empty() {
@@ -924,6 +1008,10 @@ pub async fn messages(
                             .send(Event::default().event("content_block_delta").data(ev.to_string()))
                             .await;
                         log::debug!("🧠 OUTPUT: Streamed thinking delta ({} chars)", r.len());
+
+                        // Count reasoning tokens (approximate)
+                        let reasoning_tokens = std::cmp::max(1, r.len() / 4) as u32;
+                        output_token_count += reasoning_tokens;
                     }
                 }
 
@@ -939,7 +1027,7 @@ pub async fn messages(
                             thinking_open = false;
                             log::info!("🧠 OUTPUT: Closed thinking block before text (index={})", thinking_index);
                         }
-                        
+
                         if !text_open {
                             text_index = next_block_index;
                             next_block_index += 1;
@@ -961,6 +1049,10 @@ pub async fn messages(
                         let _ = tx
                             .send(Event::default().event("content_block_delta").data(ev.to_string()))
                             .await;
+
+                        // Count text tokens (approximate)
+                        let text_tokens = std::cmp::max(1, c.len() / 4) as u32;
+                        output_token_count += text_tokens;
                     }
                 }
 
@@ -1092,7 +1184,7 @@ pub async fn messages(
         let md = json!({
             "type":"message_delta",
             "delta":{"stop_reason":final_stop_reason,"stop_sequence":null},
-            "usage":{"output_tokens":0}
+            "usage":{"output_tokens":output_token_count}
         });
         let _ = tx
             .send(Event::default().event("message_delta").data(md.to_string()))
