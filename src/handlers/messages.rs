@@ -319,26 +319,24 @@ pub async fn messages(
             }
 
             // Interleave thinking: prepend thinking blocks as <think> tags
-            let content = if thinking_parts.is_empty() && text_parts.is_empty() {
-                Value::Null
-            } else {
-                let mut combined = String::new();
-                
-                // Add thinking content first, wrapped in <think> tags
-                if !thinking_parts.is_empty() {
-                    let thinking_text = thinking_parts.join("\n");
-                    let thinking_len = thinking_text.len();
-                    combined.push_str(&format!("<think>{}</think>\n", thinking_text));
-                    log::info!("🧠 INPUT: Converted {} thinking block(s) ({} chars) to interleaved <think> format", thinking_parts.len(), thinking_len);
-                }
-                
-                // Add regular text content
-                if !text_parts.is_empty() {
-                    combined.push_str(&text_parts.join("\n"));
-                }
-                
-                json!(combined)
-            };
+            // Always use a string (even if empty) for better backend compatibility
+            let mut combined = String::new();
+            
+            // Add thinking content first, wrapped in <think> tags
+            if !thinking_parts.is_empty() {
+                let thinking_text = thinking_parts.join("\n");
+                let thinking_len = thinking_text.len();
+                combined.push_str(&format!("<think>{}</think>\n", thinking_text));
+                log::info!("🧠 INPUT: Converted {} thinking block(s) ({} chars) to interleaved <think> format", thinking_parts.len(), thinking_len);
+            }
+            
+            // Add regular text content
+            if !text_parts.is_empty() {
+                combined.push_str(&text_parts.join("\n"));
+            }
+            
+            // Use empty string instead of null for tool-only messages (better compatibility)
+            let content = json!(combined);
 
             msgs.push(OAIMessage {
                 role: m.role,
@@ -565,18 +563,19 @@ pub async fn messages(
                     );
                     let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
 
+                    let message_obj = serde_json::json!({
+                        "id": format!("msg_{}", now),
+                        "type": "message",
+                        "role": "assistant",
+                        "content": serde_json::json!([]),  // Explicitly create empty array
+                        "model": model_name_for_response,
+                        "stop_reason": Value::Null,
+                        "stop_sequence": Value::Null,
+                        "usage": { "input_tokens": input_token_count, "output_tokens": 0 }
+                    });
                     let start = json!({
                         "type": "message_start",
-                        "message": {
-                            "id": format!("msg_{}", now),
-                            "type": "message",
-                            "role": "assistant",
-                            "content": [],
-                            "model": model_name_for_response,
-                            "stop_reason": Value::Null,
-                            "stop_sequence": Value::Null,
-                            "usage": { "input_tokens": input_token_count, "output_tokens": 0 }
-                        }
+                        "message": message_obj
                     });
                     let _ = tx.send(Event::default().event("message_start").data(start.to_string())).await;
 
@@ -642,18 +641,19 @@ pub async fn messages(
             log::debug!("🎬 Synthetic error response task started");
             let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
 
+            let message_obj = serde_json::json!({
+                "id": format!("msg_{}", now),
+                "type": "message",
+                "role": "assistant",
+                "content": serde_json::json!([]),  // Explicitly create empty array
+                "model": model_name,
+                "stop_reason": Value::Null,
+                "stop_sequence": Value::Null,
+                "usage": { "input_tokens": input_token_count, "output_tokens": 0 }
+            });
             let start = json!({
                 "type": "message_start",
-                "message": {
-                    "id": format!("msg_{}", now),
-                    "type": "message",
-                    "role": "assistant",
-                    "content": [],
-                    "model": model_name,
-                    "stop_reason": Value::Null,
-                    "stop_sequence": Value::Null,
-                    "usage": { "input_tokens": input_token_count, "output_tokens": 0 }
-                }
+                "message": message_obj
             });
             let _ = tx.send(Event::default().event("message_start").data(start.to_string())).await;
 
@@ -704,22 +704,33 @@ pub async fn messages(
     tokio::spawn(async move {
         log::debug!("🎬 Streaming task started");
 
-        // Emit Claude "message_start"
+        // Emit Claude "message_start" - ensure content is always an array
         let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-        let start = json!({
-            "type":"message_start",
-            "message": {
-                "id": format!("msg_{now}"),
-                "type":"message", "role":"assistant",
-                "content": [], "model": model_for_header,
-                "stop_reason": serde_json::Value::Null,
-                "stop_sequence": serde_json::Value::Null,
-                "usage": {"input_tokens":input_token_count, "output_tokens":0}
+        let message_obj = serde_json::json!({
+            "id": format!("msg_{now}"),
+            "type": "message",
+            "role": "assistant",
+            "content": serde_json::json!([]),  // Explicitly create empty array
+            "model": model_for_header,
+            "stop_reason": serde_json::Value::Null,
+            "stop_sequence": serde_json::Value::Null,
+            "usage": {
+                "input_tokens": input_token_count,
+                "output_tokens": 0
             }
         });
-        let _ = tx
+        
+        let start = json!({
+            "type": "message_start",
+            "message": message_obj
+        });
+        
+        if let Err(e) = tx
             .send(Event::default().event("message_start").data(start.to_string()))
-            .await;
+            .await 
+        {
+            log::warn!("⚠️  Failed to send message_start event: {:?}", e);
+        }
 
         let mut bytes_stream = res.bytes_stream();
 
