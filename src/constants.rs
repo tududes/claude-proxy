@@ -43,19 +43,11 @@ pub const CHARS_PER_TOKEN: usize = 4;
 // ============================================================================
 
 /// Number of consecutive failures before circuit breaker opens
-/// Defined in models/app.rs
 pub const CIRCUIT_BREAKER_FAILURE_THRESHOLD: u32 = 5;
-
-/// Circuit breaker timeout duration in seconds
-pub const CIRCUIT_BREAKER_TIMEOUT_SECS: u64 = 30;
 
 // ============================================================================
 // SSE Streaming Configuration
 // ============================================================================
-
-/// Maximum SSE buffer size before clearing (1MB)
-/// Prevents unbounded memory growth from malformed streams
-pub const MAX_SSE_BUFFER_SIZE: usize = 1_048_576;
 
 /// SSE channel buffer size for tokio mpsc
 /// Balances memory usage with streaming performance
