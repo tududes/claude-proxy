@@ -575,7 +575,7 @@ pub async fn messages(
                             "model": model_name_for_response,
                             "stop_reason": Value::Null,
                             "stop_sequence": Value::Null,
-                            "usage": { "input_tokens": 0, "output_tokens": 0 }
+                            "usage": { "input_tokens": input_token_count, "output_tokens": 0 }
                         }
                     });
                     let _ = tx.send(Event::default().event("message_start").data(start.to_string())).await;
@@ -652,7 +652,7 @@ pub async fn messages(
                     "model": model_name,
                     "stop_reason": Value::Null,
                     "stop_sequence": Value::Null,
-                    "usage": { "input_tokens": 0, "output_tokens": 0 }
+                    "usage": { "input_tokens": input_token_count, "output_tokens": 0 }
                 }
             });
             let _ = tx.send(Event::default().event("message_start").data(start.to_string())).await;
@@ -970,17 +970,15 @@ pub async fn messages(
                     if let Some(prompt_tokens) = usage.prompt_tokens {
                         log::debug!("📊 Backend reported prompt tokens: {}", prompt_tokens);
                     }
-                    if let Some(completion_tokens) = usage.completion_tokens {
-                        // Use completion_tokens if total_tokens not provided
-                        if output_token_count == 0 {
-                            output_token_count = completion_tokens;
-                            log::debug!("📊 Backend reported completion tokens: {}", completion_tokens);
-                        }
-                    }
                     if let Some(total_tokens) = usage.total_tokens {
-                        // total_tokens is most accurate - use it if available
+                        // total_tokens is most accurate - always prefer it
                         output_token_count = total_tokens;
                         log::debug!("📊 Backend reported total tokens: {}", total_tokens);
+                    } else if let Some(completion_tokens) = usage.completion_tokens {
+                        // Use completion_tokens as fallback if total_tokens not available
+                        // This is more accurate than our streaming approximation
+                        output_token_count = completion_tokens;
+                        log::debug!("📊 Backend reported completion tokens: {}", completion_tokens);
                     }
                 }
 
