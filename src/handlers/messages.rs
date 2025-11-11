@@ -967,9 +967,20 @@ pub async fn messages(
 
                 // Check if backend provides usage statistics (more accurate than our approximation)
                 if let Some(usage) = &chunk.usage {
+                    if let Some(prompt_tokens) = usage.prompt_tokens {
+                        log::debug!("📊 Backend reported prompt tokens: {}", prompt_tokens);
+                    }
                     if let Some(completion_tokens) = usage.completion_tokens {
-                        output_token_count = completion_tokens;
-                        log::debug!("📊 Backend reported output tokens: {}", completion_tokens);
+                        // Use completion_tokens if total_tokens not provided
+                        if output_token_count == 0 {
+                            output_token_count = completion_tokens;
+                            log::debug!("📊 Backend reported completion tokens: {}", completion_tokens);
+                        }
+                    }
+                    if let Some(total_tokens) = usage.total_tokens {
+                        // total_tokens is most accurate - use it if available
+                        output_token_count = total_tokens;
+                        log::debug!("📊 Backend reported total tokens: {}", total_tokens);
                     }
                 }
 
