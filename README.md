@@ -15,7 +15,7 @@ Routes Claude Code / Claude API requests to any OpenAI-compatible backend (SGLan
 - Token counting endpoint (tiktoken-based)
 - Optional circuit breaker (disabled by default, can be enabled via env)
 - Health check endpoint
-- Request validation (max 10,000 messages, 5MB content)
+- Request validation (max 10,000 messages, 10MB content)
 
 ## Quick Start
 
