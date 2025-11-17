@@ -16,7 +16,7 @@ use crate::models::{App, ClaudeRequest, ClaudeContentBlock, OAIMessage, OAIChatR
 use crate::services::{SseEventParser, ToolBuf, ToolsMap, extract_client_key, mask_token,
                      get_available_models, format_backend_error, build_model_list_content};
 use crate::utils::normalize_model_name;
-use crate::utils::content_extraction::{translate_finish_reason, build_oai_tools, convert_system_content, serialize_tool_result_content};
+use crate::utils::content_extraction::{translate_finish_reason, build_oai_tools, convert_system_content, convert_tool_choice, serialize_tool_result_content};
 
 /// Count tokens in a Claude request using tiktoken
 fn count_input_tokens(
@@ -422,6 +422,7 @@ pub async fn messages(
     }
 
     let tools = build_oai_tools(cr.tools);
+    let tool_choice = convert_tool_choice(cr.tool_choice);
 
     let backend_model_for_error = backend_model.clone();
 
@@ -436,7 +437,7 @@ pub async fn messages(
         top_k: cr.top_k,
         stop: cr.stop_sequences,
         tools,
-        tool_choice: cr.tool_choice,
+        tool_choice,
         thinking: thinking_config.map(|tc| serde_json::to_value(tc).unwrap_or(Value::Null)),
         stream: true,
     };

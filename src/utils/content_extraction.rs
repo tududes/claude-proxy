@@ -1,4 +1,4 @@
-use serde_json::Value;
+use serde_json::{json, Value};
 
 /// Extract text content from Claude content value (string or array of blocks)
 /// Returns tuple: (text_content, image_count)
@@ -124,6 +124,78 @@ pub fn build_oai_tools(tools: Option<Vec<crate::models::ClaudeTool>>) -> Option<
                 .collect::<Vec<_>>(),
         ),
         _ => Some(vec![]),
+    }
+}
+
+/// Convert Claude `tool_choice` schema to OpenAI-compatible values.
+pub fn convert_tool_choice(tool_choice: Option<Value>) -> Option<Value> {
+    let Some(choice) = tool_choice else {
+        return None;
+    };
+
+    match choice {
+        Value::String(s) => match s.to_ascii_lowercase().as_str() {
+            "auto" => Some(Value::String("auto".into())),
+            "none" => Some(Value::String("none".into())),
+            "any" => {
+                log::info!("🔧 tool_choice: 'any' → 'required' for OpenAI compatibility");
+                Some(Value::String("required".into()))
+            }
+            "required" => Some(Value::String("required".into())),
+            other => {
+                log::warn!("⚠️ Unknown string tool_choice '{}'; passing through", other);
+                Some(Value::String(s))
+            }
+        },
+        Value::Object(obj) => {
+            let Some(kind) = obj.get("type").and_then(|v| v.as_str()) else {
+                log::warn!("⚠️ tool_choice object missing 'type'; passing through");
+                return Some(Value::Object(obj));
+            };
+            match kind.to_ascii_lowercase().as_str() {
+                "tool" => {
+                    let name = obj
+                        .get("name")
+                        .and_then(|v| v.as_str())
+                        .or_else(|| obj.get("tool_name").and_then(|v| v.as_str()));
+                    if let Some(name) = name {
+                        if obj.get("disable_parallel_tool_use").is_some() {
+                            log::info!("ℹ️ disable_parallel_tool_use not supported; ignoring");
+                        }
+                        log::info!("🔧 tool_choice: forcing tool '{}' via function format", name);
+                        Some(json!({
+                            "type": "function",
+                            "function": { "name": name }
+                        }))
+                    } else {
+                        log::warn!("⚠️ tool_choice 'tool' missing 'name'; dropping constraint");
+                        None
+                    }
+                }
+                "function" => Some(Value::Object(obj)),
+                "auto" => Some(Value::String("auto".into())),
+                "none" => Some(Value::String("none".into())),
+                "any" => {
+                    if obj.get("disable_parallel_tool_use").is_some() {
+                        log::info!("ℹ️ disable_parallel_tool_use not supported for 'any'; ignoring");
+                    }
+                    log::info!("🔧 tool_choice: type 'any' → 'required'");
+                    Some(Value::String("required".into()))
+                }
+                "required" => Some(Value::String("required".into())),
+                other => {
+                    log::warn!("⚠️ Unknown tool_choice type '{}'; passing through", other);
+                    Some(Value::Object(obj))
+                }
+            }
+        }
+        other => {
+            log::warn!(
+                "⚠️ tool_choice should be string or object; received {:?}, passing through",
+                other
+            );
+            Some(other)
+        }
     }
 }
 
@@ -397,6 +469,49 @@ mod tests {
         let content = json!([]);
         let result = serialize_tool_result_content(&content);
         assert_eq!(result, "");
+    }
+
+    // ============================================================================
+    // convert_tool_choice tests
+    // ============================================================================
+
+    #[test]
+    fn test_convert_tool_choice_string_auto() {
+        let result = convert_tool_choice(Some(json!("auto")));
+        assert_eq!(result, Some(json!("auto")));
+    }
+
+    #[test]
+    fn test_convert_tool_choice_string_any() {
+        let result = convert_tool_choice(Some(json!("any")));
+        assert_eq!(result, Some(json!("required")));
+    }
+
+    #[test]
+    fn test_convert_tool_choice_tool_object() {
+        let result = convert_tool_choice(Some(json!({
+            "type": "tool",
+            "name": "calculator"
+        })));
+        assert_eq!(
+            result,
+            Some(json!({
+                "type": "function",
+                "function": { "name": "calculator" }
+            }))
+        );
+    }
+
+    #[test]
+    fn test_convert_tool_choice_auto_object() {
+        let result = convert_tool_choice(Some(json!({ "type": "auto" })));
+        assert_eq!(result, Some(json!("auto")));
+    }
+
+    #[test]
+    fn test_convert_tool_choice_invalid_tool() {
+        let result = convert_tool_choice(Some(json!({ "type": "tool" })));
+        assert_eq!(result, None);
     }
 
     // ============================================================================
