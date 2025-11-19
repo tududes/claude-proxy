@@ -180,7 +180,7 @@ pub async fn messages(
     // Normalize model name (case-correction only)
     let backend_model = normalize_model_name(&cr.model, &app.models_cache).await;
     let backend_model_for_metrics = backend_model.clone();
-    
+
     // Auto-enable thinking for reasoning models if not explicitly provided
     let thinking_config = if cr.thinking.is_some() {
         cr.thinking
@@ -196,14 +196,14 @@ pub async fn messages(
                         .map(|model_info| {
                             // Check if model supports thinking features
                             model_info.supported_features.iter().any(|f| {
-                                f.eq_ignore_ascii_case("thinking") || 
+                                f.eq_ignore_ascii_case("thinking") ||
                                 f.eq_ignore_ascii_case("extended_thinking")
                             })
                         })
                 })
                 .unwrap_or(false)  // Default to false if model not found
         };
-        
+
         if is_reasoning_model {
             log::info!("🧠 Auto-enabling thinking for reasoning model: {}", backend_model);
             Some(crate::models::ThinkingConfig {
@@ -214,7 +214,7 @@ pub async fn messages(
             None
         }
     };
-    
+
     let mut msgs = Vec::with_capacity(cr.messages.len() + 1);
     if let Some(sys) = cr.system {
         let system_content = convert_system_content(&sys);
@@ -322,7 +322,7 @@ pub async fn messages(
             // Interleave thinking: prepend thinking blocks as <think> tags
             // Always use a string (even if empty) for better backend compatibility
             let mut combined = String::new();
-            
+
             // Add thinking content first, wrapped in <think> tags
             if !thinking_parts.is_empty() {
                 let thinking_text = thinking_parts.join("\n");
@@ -330,12 +330,12 @@ pub async fn messages(
                 combined.push_str(&format!("<think>{}</think>\n", thinking_text));
                 log::info!("🧠 INPUT: Converted {} thinking block(s) ({} chars) to interleaved <think> format", thinking_parts.len(), thinking_len);
             }
-            
+
             // Add regular text content
             if !text_parts.is_empty() {
                 combined.push_str(&text_parts.join("\n"));
             }
-            
+
             // Use empty string instead of null for tool-only messages (better compatibility)
             let content = json!(combined);
 
@@ -549,7 +549,7 @@ pub async fn messages(
 
         // Read error response body
         let error_body = res.text().await.unwrap_or_else(|_| "Unknown error".to_string());
-        
+
         log::error!(
             "❌ Backend returned error: {} {} - {}",
             status.as_u16(),
@@ -633,7 +633,7 @@ pub async fn messages(
 
         // For retryable errors (rate limits, server errors), pass through HTTP status
         // so Claude Code can retry automatically
-        if matches!(status, 
+        if matches!(status,
             StatusCode::TOO_MANY_REQUESTS |  // 429
             StatusCode::INTERNAL_SERVER_ERROR |  // 500
             StatusCode::BAD_GATEWAY |  // 502
@@ -731,12 +731,12 @@ pub async fn messages(
                 "output_tokens": 0
             }
         });
-        
+
         let start = json!({
             "type": "message_start",
             "message": message_obj
         });
-        
+
         // If we can't send message_start, client is gone - no point continuing
         if tx.send(Event::default().event("message_start").data(start.to_string())).await.is_err() {
             log::debug!("🔌 Client disconnected before message_start - aborting stream");
@@ -784,13 +784,16 @@ pub async fn messages(
                 }
 
                 // First, try to parse as generic JSON to understand the structure
-                let json_value: serde_json::Result<Value> = serde_json::from_str(data);
+                // Optimization: Parse directly into OAIStreamChunk first to avoid double parsing
                 let parsed: serde_json::Result<OAIStreamChunk> = serde_json::from_str(data);
 
                 let chunk = match parsed {
                     Ok(c) => c,
                     Err(e) => {
-                        // Try to extract useful information from the raw JSON
+                        // Only if strict parsing fails, try generic Value to inspect error structure
+                        // or log the failure with more context
+                        let json_value: serde_json::Result<Value> = serde_json::from_str(data);
+
                         if let Ok(val) = json_value {
                             // Check if it's an error response
                             if let Some(error_obj) = val.get("error") {
