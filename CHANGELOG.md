@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.8] - 2025-11-19
+
+### Fixed
+- **Streaming parser UTF-8 safety** - Reworked `SseEventParser` to buffer raw bytes, preventing corrupted characters when SSE chunks split multi-byte sequences.
+- **SSE chunk parsing overhead** - Removed double JSON parsing per chunk, reducing CPU usage under heavy streaming loads.
+
+### Changed
+- **Version bump** - Updated crate metadata to `0.1.8` for release tagging.
+
+## [0.1.7] - 2025-11-19
+
+### Fixed
+- **Parallel Tool Use** - Mapped `disable_parallel_tool_use: true` in `tool_choice` to `parallel_tool_calls: false` in OpenAI request.
+- **Stop Sequences** - Truncated `stop_sequences` to 4 items to prevent OpenAI backend errors.
+- **API Compatibility** - Added `parallel_tool_calls` support to `OAIChatReq` model.
+
+### Changed
+- **Refactoring** - Updated `convert_tool_choice` to extract parallel tool use settings.
+
 ## [0.1.6] - 2025-11-10
 
 ### Fixed
