@@ -24,15 +24,15 @@ API_TIMEOUT_MS=6000000
 # ========================
 
 log_info() {
-    echo "ðŸ”¹ $*"
+    echo "[INFO] $*"
 }
 
 log_success() {
-    echo "âœ… $*"
+    echo "[ OK ] $*"
 }
 
 log_error() {
-    echo "âŒ $*" >&2
+    echo "[ERR ] $*" >&2
 }
 
 ensure_dir_exists() {
@@ -163,22 +163,31 @@ select_model() {
     models=$(echo "$models_response" | node --eval '
         const data = JSON.parse(require("fs").readFileSync(0, "utf-8"));
         if (data.data && Array.isArray(data.data)) {
-            data.data.forEach((model, idx) => {
-                const id = model.id || "";
-                const inputPrice = model.price?.input?.usd || model.pricing?.prompt || 0;
-                const outputPrice = model.price?.output?.usd || model.pricing?.completion || 0;
-                const features = model.supported_features?.join(",") || "";
-                const hasThinking = features.includes("thinking") ? "💭" : "  ";
-                
-                // Format pricing as $ per 1M tokens (API already returns per-1M prices)
-                let priceTag = "       ";
-                if (inputPrice > 0 || outputPrice > 0) {
-                    const inPrice = inputPrice.toFixed(2);
-                    const outPrice = outputPrice.toFixed(2);
-                    priceTag = `$${inPrice}/$${outPrice}`;
-                }
-                
-                console.log((idx + 1) + "|" + id + "|" + priceTag + "|" + hasThinking);
+            const entries = data.data
+                .map((model) => {
+                    const id = model.id || "";
+                    if (!id) return null;
+
+                    const inputPrice = model.price?.input?.usd ?? model.pricing?.prompt ?? 0;
+                    const outputPrice = model.price?.output?.usd ?? model.pricing?.completion ?? 0;
+                    const features = model.supported_features?.join(",") || "";
+                    const thinkTag = features.includes("thinking") ? "[TH]" : "    ";
+
+                    // Format pricing as $ per 1M tokens (API already returns per-1M prices)
+                    let priceTag = "       ";
+                    if (inputPrice > 0 || outputPrice > 0) {
+                        const inPrice = Number(inputPrice).toFixed(2);
+                        const outPrice = Number(outputPrice).toFixed(2);
+                        priceTag = `$${inPrice}/$${outPrice}`;
+                    }
+
+                    return { id, priceTag, thinkTag };
+                })
+                .filter(Boolean)
+                .sort((a, b) => a.id.localeCompare(b.id, undefined, { sensitivity: "base" }));
+
+            entries.forEach((entry, idx) => {
+                console.log((idx + 1) + "|" + entry.id + "|" + entry.priceTag + "|" + entry.thinkTag);
             });
         }
     ' 2>/dev/null)
@@ -188,6 +197,10 @@ select_model() {
         echo "   Using default model: deepseek-ai/DeepSeek-R1" >&2
         echo "deepseek-ai/DeepSeek-R1"
         return
+    fi
+    
+    if [ -n "${CLAUDE_MODEL_LIST_FILE:-}" ]; then
+        printf "%s\n" "$models" > "$CLAUDE_MODEL_LIST_FILE"
     fi
     
     # Display models in two columns
@@ -205,7 +218,12 @@ select_model() {
     
     for ((i=0; i<half; i++)); do
         local left="${model_array[$i]}"
-        local right="${model_array[$((i + half))]}"
+        local right_index=$((i + half))
+        local right=""
+        
+        if [ "$right_index" -lt "$total" ]; then
+            right="${model_array[$right_index]}"
+        fi
         
         IFS='|' read -r num1 id1 price1 think1 <<< "$left"
         printf "  %2s) %s %-45s %-16s" "$num1" "$think1" "$id1" "$price1" >&2
@@ -222,8 +240,13 @@ select_model() {
     local total_models
     total_models=$(echo "$models" | wc -l)
     
+    if [ "${CLAUDE_NONINTERACTIVE:-0}" = "1" ]; then
+        echo "$models" | sed -n '1p' | cut -d'|' -f2
+        return
+    fi
+    
     while true; do
-        read -p "🎯 Select a model (1-$total_models) [default: 1]: " selection </dev/tty
+        read -p "Select a model (1-$total_models) [default: 1]: " selection </dev/tty
         selection=${selection:-1}
         
         if [[ "$selection" =~ ^[0-9]+$ ]] && [ "$selection" -ge 1 ] && [ "$selection" -le "$total_models" ]; then
@@ -244,7 +267,7 @@ select_model() {
 configure_claude() {
     log_info "Configuring Claude Code..."
     echo "   You can get your API key from: $API_KEY_URL"
-    read -s -p "🔑 Please enter your chutes.ai API key: " api_key
+    read -s -p "Enter your chutes.ai API key: " api_key
     echo
 
     if [ -z "$api_key" ]; then
@@ -305,7 +328,7 @@ configure_claude() {
 # ========================
 
 main() {
-    echo "ðŸš€ Starting $SCRIPT_NAME"
+    echo "[START] $SCRIPT_NAME"
 
     check_nodejs
     install_claude_code
@@ -313,10 +336,12 @@ main() {
     configure_claude
 
     echo ""
-    log_success "ðŸŽ‰ Installation completed successfully!"
+    log_success "Installation completed successfully!"
     echo ""
-    echo "ðŸš€ You can now start using Claude Code with:"
+    echo "[TIP ] You can now start using Claude Code with:"
     echo "   claude"
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main "$@"
+fi
