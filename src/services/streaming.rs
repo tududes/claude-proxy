@@ -383,7 +383,6 @@ mod tests {
 
         // Euro symbol '€' is 3 bytes: [226, 130, 172]
         let euro = "€";
-        let euro_bytes = euro.as_bytes();
 
         // Send partial bytes
         let part1 = format!("data: price: {}", euro);
