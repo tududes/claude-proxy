@@ -40,7 +40,7 @@ interface MessageCreateParamsBase {
 ```rust
 pub struct ClaudeRequest {
     pub model: String,                             // ✅ Supported
-    pub messages: Vec<ClaudeMessage>,              // ✅ Supported (validation: max 10,000)
+    pub messages: Vec<ClaudeMessage>,              // ✅ Supported (validation: max 100,000)
     pub system: Option<Value>,                     // ✅ Supported (string or array)
     pub max_tokens: Option<u32>,                   // ✅ Supported (validation: 1-100,000)
     pub temperature: Option<f32>,                  // ✅ Supported
@@ -469,7 +469,7 @@ pub struct OAIFunction {
 
 | Validation | Anthropic Spec | Our Implementation | Difference |
 |------------|----------------|-------------------|------------|
-| Max messages | 100,000 | 10,000 | More permissive than before (was 1,000) |
+| Max messages | 100,000 | 100,000 | ✅ Full spec compliance |
 | Max content size | Not specified | 5 MB | Additional safety limit |
 | Max system size | Not specified | 100 KB | Additional safety limit |
 | Max tokens range | Model-dependent | 1 - 100,000 | Hard-coded range |

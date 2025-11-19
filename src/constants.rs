@@ -8,8 +8,8 @@
 // ============================================================================
 
 /// Maximum number of messages allowed in a single request
-/// Prevents excessive memory usage and processing time
-pub const MAX_MESSAGES_PER_REQUEST: usize = 10_000;
+/// Matches Anthropic's specification limit of 100,000 messages
+pub const MAX_MESSAGES_PER_REQUEST: usize = 100_000;
 
 /// Maximum total content size across all messages (5MB)
 /// Prevents payload too large errors and excessive memory usage

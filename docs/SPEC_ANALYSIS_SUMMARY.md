@@ -51,7 +51,7 @@ This allows any OpenAI-compatible backend (vLLM, SGLang, Ollama, etc.) to serve 
 
 | Check | Anthropic Spec | Our Implementation | Assessment |
 |-------|----------------|-------------------|------------|
-| Max messages | 100,000 | 10,000 | ✅ Reasonable limit (10x improvement in v0.1.5) |
+| Max messages | 100,000 | 100,000 | ✅ Full spec compliance |
 | Content size | Unspecified | 5 MB | ✅ Reasonable safety limit |
 | System prompt | Unspecified | 100 KB | ✅ Reasonable safety limit |
 | Max tokens | Model-dependent | 1-100,000 | ⚠️  Hard-coded range |
@@ -111,9 +111,9 @@ This allows any OpenAI-compatible backend (vLLM, SGLang, Ollama, etc.) to serve 
    - Built-in web search not available
    - Workaround: Implement custom tool
 
-6. ~~**Message limit (1,000)**~~ ✅ **IMPROVED** (v0.1.5 - now 10,000)
-   - Can now handle much longer conversations
-   - 10x increase in capacity
+6. ~~**Message limit (1,000)**~~ ✅ **FULL COMPLIANCE** (v0.1.10 - now 100,000)
+   - Matches Anthropic's specification exactly
+   - 100x increase from v0.1.4
 
 ### Low Impact (Advanced Use Cases)
 
