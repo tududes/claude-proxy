@@ -116,8 +116,10 @@ impl SseEventParser {
 #[derive(Clone)]
 pub struct ToolBuf {
     pub block_index: i32,
-    pub id: String,
-    pub name: String,
+    pub id: Option<String>,
+    pub name: Option<String>,
+    pub pending_args: String,
+    pub has_sent_start: bool,
 }
 
 pub type ToolsMap = HashMap<usize, ToolBuf>;

@@ -1099,46 +1099,68 @@ pub async fn messages(
 
                         for tc in tool_calls {
                             let idx = tc.index.unwrap_or(0);
-                            if !tools.contains_key(&idx) {
-                                let id = tc.id.clone().unwrap_or_else(|| format!("tool_{idx}"));
-                                let name = tc
-                                    .function
-                                    .as_ref()
-                                    .and_then(|f| f.name.clone())
-                                    .unwrap_or_else(|| "tool".into());
-                                let tb = ToolBuf {
+                            
+                            // Initialize tool buffer if not present
+                            let tb = tools.entry(idx).or_insert_with(|| {
+                                ToolBuf {
                                     block_index: next_block_index,
-                                    id,
-                                    name,
-                                };
-                                next_block_index += 1;
+                                    id: None,
+                                    name: None,
+                                    pending_args: String::new(),
+                                    has_sent_start: false,
+                                }
+                            });
 
+                            // Update fields from delta
+                            if let Some(id) = &tc.id {
+                                tb.id = Some(id.clone());
+                            }
+                            if let Some(name) = tc.function.as_ref().and_then(|f| f.name.clone()) {
+                                tb.name = Some(name);
+                            }
+
+                            // Capture arguments in buffer first
+                            if let Some(args) = tc.function.as_ref().and_then(|f| f.arguments.clone()) {
+                                tb.pending_args.push_str(&args);
+                            }
+
+                            // Check if we can start the block (need ID and Name)
+                            // Only increment next_block_index ONCE when we actually start the block
+                            if !tb.has_sent_start && tb.id.is_some() && tb.name.is_some() {
+                                // Assign the block index now
+                                tb.block_index = next_block_index;
+                                next_block_index += 1;
+                                
                                 let start = json!({
                                     "type":"content_block_start",
                                     "index":tb.block_index,
                                     "content_block":{
                                         "type":"tool_use",
-                                        "id":tb.id,
-                                        "name":tb.name,
+                                        "id":tb.id.as_ref().unwrap(),
+                                        "name":tb.name.as_ref().unwrap(),
                                         "input":{}
                                     }
                                 });
-                                let _ = tx
-                                    .send(Event::default().event("content_block_start").data(start.to_string()))
-                                    .await;
-                                tools.insert(idx, tb);
-                            }
-                            if let Some(f) = &tc.function {
-                                if let Some(args) = &f.arguments {
-                                    let ev = json!({
-                                        "type":"content_block_delta",
-                                        "index": tools.get(&idx).unwrap().block_index,
-                                        "delta":{"type":"input_json_delta","partial_json": args}
-                                    });
-                                    let _ = tx
-                                        .send(Event::default().event("content_block_delta").data(ev.to_string()))
-                                        .await;
+                                if tx.send(Event::default().event("content_block_start").data(start.to_string())).await.is_err() {
+                                    log::debug!("🔌 Client disconnected during tool start");
+                                    break;
                                 }
+                                tb.has_sent_start = true;
+                                log::info!("🔧 Tool call started: id={}, name={}", tb.id.as_ref().unwrap(), tb.name.as_ref().unwrap());
+                            }
+
+                            // If started, flush pending args and stream
+                            if tb.has_sent_start && !tb.pending_args.is_empty() {
+                                let ev = json!({
+                                    "type":"content_block_delta",
+                                    "index": tb.block_index,
+                                    "delta":{"type":"input_json_delta","partial_json": tb.pending_args}
+                                });
+                                if tx.send(Event::default().event("content_block_delta").data(ev.to_string())).await.is_err() {
+                                    log::debug!("🔌 Client disconnected during tool args");
+                                    break;
+                                }
+                                tb.pending_args.clear();
                             }
                         }
                     }
