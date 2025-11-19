@@ -148,12 +148,9 @@ pub async fn messages(
         }
     }
 
-    // Log warnings for unsupported parameters (accepted but ignored)
-    if cr.metadata.is_some() {
-        log::warn!("⚠️  'metadata' parameter not supported by backend (accepted but ignored)");
-    }
+    // Log warning for service_tier (not supported by OpenAI, will be ignored)
     if cr.service_tier.is_some() {
-        log::warn!("⚠️  'service_tier' parameter not supported by backend (accepted but ignored)");
+        log::debug!("ℹ️  'service_tier' parameter forwarded (may be ignored by backend)");
     }
 
     // Debug: Log incoming headers (names only)
@@ -449,6 +446,7 @@ pub async fn messages(
         tool_choice,
         thinking: thinking_config.map(|tc| serde_json::to_value(tc).unwrap_or(Value::Null)),
         parallel_tool_calls,
+        metadata: cr.metadata,
         stream: true,
     };
 
