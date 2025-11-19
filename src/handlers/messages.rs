@@ -422,9 +422,18 @@ pub async fn messages(
     }
 
     let tools = build_oai_tools(cr.tools);
-    let tool_choice = convert_tool_choice(cr.tool_choice);
+    let (tool_choice, parallel_tool_calls) = convert_tool_choice(cr.tool_choice);
 
     let backend_model_for_error = backend_model.clone();
+
+    // Limit stop sequences to 4 to avoid backend errors (OpenAI limit)
+    let stop = cr.stop_sequences.map(|mut s| {
+        if s.len() > 4 {
+            log::warn!("⚠️  Truncating stop_sequences from {} to 4 items", s.len());
+            s.truncate(4);
+        }
+        s
+    });
 
     // Preserve your behavior: always stream SSE to backend
     let oai = OAIChatReq {
@@ -435,10 +444,11 @@ pub async fn messages(
         temperature: cr.temperature,
         top_p: cr.top_p,
         top_k: cr.top_k,
-        stop: cr.stop_sequences,
+        stop,
         tools,
         tool_choice,
         thinking: thinking_config.map(|tc| serde_json::to_value(tc).unwrap_or(Value::Null)),
+        parallel_tool_calls,
         stream: true,
     };
 

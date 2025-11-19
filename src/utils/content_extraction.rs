@@ -128,29 +128,36 @@ pub fn build_oai_tools(tools: Option<Vec<crate::models::ClaudeTool>>) -> Option<
 }
 
 /// Convert Claude `tool_choice` schema to OpenAI-compatible values.
-pub fn convert_tool_choice(tool_choice: Option<Value>) -> Option<Value> {
+/// Returns (tool_choice_value, parallel_tool_calls_bool)
+pub fn convert_tool_choice(tool_choice: Option<Value>) -> (Option<Value>, Option<bool>) {
     let Some(choice) = tool_choice else {
-        return None;
+        return (None, None);
     };
 
     match choice {
         Value::String(s) => match s.to_ascii_lowercase().as_str() {
-            "auto" => Some(Value::String("auto".into())),
-            "none" => Some(Value::String("none".into())),
+            "auto" => (Some(Value::String("auto".into())), None),
+            "none" => (Some(Value::String("none".into())), None),
             "any" => {
                 log::info!("🔧 tool_choice: 'any' → 'required' for OpenAI compatibility");
-                Some(Value::String("required".into()))
+                (Some(Value::String("required".into())), None)
             }
-            "required" => Some(Value::String("required".into())),
+            "required" => (Some(Value::String("required".into())), None),
             other => {
                 log::warn!("⚠️ Unknown string tool_choice '{}'; passing through", other);
-                Some(Value::String(s))
+                (Some(Value::String(s)), None)
             }
         },
         Value::Object(obj) => {
+            let parallel_disabled = if let Some(val) = obj.get("disable_parallel_tool_use") {
+                val.as_bool().map(|b| !b) // if disable=true, parallel=false
+            } else {
+                None
+            };
+
             let Some(kind) = obj.get("type").and_then(|v| v.as_str()) else {
                 log::warn!("⚠️ tool_choice object missing 'type'; passing through");
-                return Some(Value::Object(obj));
+                return (Some(Value::Object(obj)), parallel_disabled);
             };
             match kind.to_ascii_lowercase().as_str() {
                 "tool" => {
@@ -159,33 +166,27 @@ pub fn convert_tool_choice(tool_choice: Option<Value>) -> Option<Value> {
                         .and_then(|v| v.as_str())
                         .or_else(|| obj.get("tool_name").and_then(|v| v.as_str()));
                     if let Some(name) = name {
-                        if obj.get("disable_parallel_tool_use").is_some() {
-                            log::info!("ℹ️ disable_parallel_tool_use not supported; ignoring");
-                        }
                         log::info!("🔧 tool_choice: forcing tool '{}' via function format", name);
-                        Some(json!({
+                        (Some(json!({
                             "type": "function",
                             "function": { "name": name }
-                        }))
+                        })), parallel_disabled)
                     } else {
                         log::warn!("⚠️ tool_choice 'tool' missing 'name'; dropping constraint");
-                        None
+                        (None, parallel_disabled)
                     }
                 }
-                "function" => Some(Value::Object(obj)),
-                "auto" => Some(Value::String("auto".into())),
-                "none" => Some(Value::String("none".into())),
+                "function" => (Some(Value::Object(obj)), parallel_disabled),
+                "auto" => (Some(Value::String("auto".into())), parallel_disabled),
+                "none" => (Some(Value::String("none".into())), parallel_disabled),
                 "any" => {
-                    if obj.get("disable_parallel_tool_use").is_some() {
-                        log::info!("ℹ️ disable_parallel_tool_use not supported for 'any'; ignoring");
-                    }
-                    log::info!("🔧 tool_choice: type 'any' → 'required'");
-                    Some(Value::String("required".into()))
+                     log::info!("🔧 tool_choice: type 'any' → 'required'");
+                     (Some(Value::String("required".into())), parallel_disabled)
                 }
-                "required" => Some(Value::String("required".into())),
+                "required" => (Some(Value::String("required".into())), parallel_disabled),
                 other => {
                     log::warn!("⚠️ Unknown tool_choice type '{}'; passing through", other);
-                    Some(Value::Object(obj))
+                    (Some(Value::Object(obj)), parallel_disabled)
                 }
             }
         }
@@ -194,7 +195,7 @@ pub fn convert_tool_choice(tool_choice: Option<Value>) -> Option<Value> {
                 "⚠️ tool_choice should be string or object; received {:?}, passing through",
                 other
             );
-            Some(other)
+            (Some(other), None)
         }
     }
 }
@@ -477,19 +478,21 @@ mod tests {
 
     #[test]
     fn test_convert_tool_choice_string_auto() {
-        let result = convert_tool_choice(Some(json!("auto")));
+        let (result, parallel) = convert_tool_choice(Some(json!("auto")));
         assert_eq!(result, Some(json!("auto")));
+        assert_eq!(parallel, None);
     }
 
     #[test]
     fn test_convert_tool_choice_string_any() {
-        let result = convert_tool_choice(Some(json!("any")));
+        let (result, parallel) = convert_tool_choice(Some(json!("any")));
         assert_eq!(result, Some(json!("required")));
+        assert_eq!(parallel, None);
     }
 
     #[test]
     fn test_convert_tool_choice_tool_object() {
-        let result = convert_tool_choice(Some(json!({
+        let (result, parallel) = convert_tool_choice(Some(json!({
             "type": "tool",
             "name": "calculator"
         })));
@@ -500,18 +503,31 @@ mod tests {
                 "function": { "name": "calculator" }
             }))
         );
+        assert_eq!(parallel, None);
     }
 
     #[test]
     fn test_convert_tool_choice_auto_object() {
-        let result = convert_tool_choice(Some(json!({ "type": "auto" })));
+        let (result, parallel) = convert_tool_choice(Some(json!({ "type": "auto" })));
         assert_eq!(result, Some(json!("auto")));
+        assert_eq!(parallel, None);
     }
 
     #[test]
     fn test_convert_tool_choice_invalid_tool() {
-        let result = convert_tool_choice(Some(json!({ "type": "tool" })));
+        let (result, parallel) = convert_tool_choice(Some(json!({ "type": "tool" })));
         assert_eq!(result, None);
+        assert_eq!(parallel, None);
+    }
+
+    #[test]
+    fn test_convert_tool_choice_disable_parallel() {
+        let (result, parallel) = convert_tool_choice(Some(json!({
+            "type": "auto",
+            "disable_parallel_tool_use": true
+        })));
+        assert_eq!(result, Some(json!("auto")));
+        assert_eq!(parallel, Some(false));
     }
 
     // ============================================================================
