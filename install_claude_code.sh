@@ -111,7 +111,8 @@ check_nodejs() {
 
 install_claude_code() {
     if command -v claude &>/dev/null; then
-        log_success "Claude Code is already installed: $(claude --version)"
+        log_success "Claude Code is already installed: $(claude --version). Updating..."
+        claude update
     else
         log_info "Installing Claude Code..."
         npm install -g "$CLAUDE_PACKAGE" || {
